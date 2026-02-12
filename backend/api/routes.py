@@ -2,18 +2,29 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import tempfile
 from pathlib import Path
 from typing import Any
 
+import cv2
+import numpy as np
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse
+from pdf2image import convert_from_path
 from pydantic import BaseModel
 
+from aecai.config import POPPLER_PATH
 from .jobs import JobStatus, create_job, get_job
 
 router = APIRouter(prefix="/api")
+
+# ---------------------------------------------------------------------------
+# Temp file store for previewed PDFs (maps preview_id → path)
+# ---------------------------------------------------------------------------
+_preview_files: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -38,9 +49,48 @@ class JobResponse(BaseModel):
     error: str | None = None
 
 
+class PagePreview(BaseModel):
+    page_number: int
+    thumbnail: str  # base64 JPEG
+    is_legend: bool
+
+
+class PreviewResponse(BaseModel):
+    preview_id: str
+    total_pages: int
+    pages: list[PagePreview]
+
+
 class HealthResponse(BaseModel):
     status: str
     service: str
+
+
+# ---------------------------------------------------------------------------
+# Helpers – legend detection
+# ---------------------------------------------------------------------------
+
+def _detect_legend_page(pil_images: list) -> int | None:
+    """Try to identify which page is the symbol legend.
+
+    Checks for the word 'LEGEND' or 'SYMBOL' in large text regions.
+    Returns 1-based page number or None.
+    """
+    import pytesseract
+    from aecai.config import TESSERACT_CMD
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+
+    for idx, pil_img in enumerate(pil_images):
+        # Use a low-res version for speed
+        small = pil_img.resize((800, int(800 * pil_img.height / pil_img.width)))
+        try:
+            text = pytesseract.image_to_string(small, config="--psm 3")
+            upper = text.upper()
+            if "LEGEND" in upper or "SYMBOL SCHEDULE" in upper or "LUMINAIRE SCHEDULE" in upper:
+                return idx + 1  # 1-based
+        except Exception:
+            continue
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -53,29 +103,97 @@ async def health_check():
     return HealthResponse(status="ok", service="aecai-api")
 
 
-@router.post("/takeoff", response_model=JobResponse)
-async def start_takeoff(
-    file: UploadFile,
-    pages: str | None = None,
-    sheet_map: str | None = None,
-    multipliers: str | None = None,
-):
-    """Upload a PDF and start a takeoff job.
+@router.post("/takeoff/preview", response_model=PreviewResponse)
+async def preview_pdf(file: UploadFile):
+    """Upload a PDF and get page thumbnails + legend detection.
 
-    The PDF is saved to a temp file and processed in a background thread.
-    Poll GET /api/takeoff/{job_id} for status updates.
+    Returns low-res thumbnails and identifies which page is the legend.
+    The PDF is kept on disk so the user can start processing later
+    using the returned preview_id.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
 
-    # Save uploaded file to temp location
     suffix = Path(file.filename).suffix
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="aecai_") as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="aecai_prev_") as tmp:
         content = await file.read()
         if len(content) == 0:
             raise HTTPException(status_code=400, detail="Empty file")
         tmp.write(content)
         tmp_path = tmp.name
+
+    # Render at low DPI for thumbnails
+    kwargs: dict[str, Any] = {"dpi": 72}
+    if POPPLER_PATH:
+        kwargs["poppler_path"] = POPPLER_PATH
+
+    try:
+        pil_images = convert_from_path(tmp_path, **kwargs)
+    except Exception as e:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Failed to read PDF: {e}")
+
+    # Detect legend page
+    legend_page = _detect_legend_page(pil_images)
+
+    # Build thumbnails
+    import uuid
+    preview_id = uuid.uuid4().hex[:12]
+    _preview_files[preview_id] = tmp_path
+
+    pages: list[PagePreview] = []
+    for idx, pil_img in enumerate(pil_images):
+        # Resize to max 400px wide
+        max_w = 400
+        ratio = max_w / pil_img.width
+        thumb = pil_img.resize((max_w, int(pil_img.height * ratio)))
+
+        buf = io.BytesIO()
+        thumb.save(buf, format="JPEG", quality=60)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+        pages.append(PagePreview(
+            page_number=idx + 1,
+            thumbnail=b64,
+            is_legend=(idx + 1 == legend_page),
+        ))
+
+    return PreviewResponse(
+        preview_id=preview_id,
+        total_pages=len(pil_images),
+        pages=pages,
+    )
+
+
+@router.post("/takeoff", response_model=JobResponse)
+async def start_takeoff(
+    file: UploadFile | None = None,
+    preview_id: str | None = None,
+    pages: str | None = None,
+    sheet_map: str | None = None,
+    multipliers: str | None = None,
+):
+    """Start a takeoff job.
+
+    Either upload a new PDF (file) or reference a previously previewed one
+    (preview_id). Poll GET /api/takeoff/{job_id} for status updates.
+    """
+    tmp_path: str | None = None
+
+    if preview_id and preview_id in _preview_files:
+        tmp_path = _preview_files.pop(preview_id)
+    elif file:
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="File must be a PDF")
+        suffix = Path(file.filename).suffix
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="aecai_") as tmp:
+            content = await file.read()
+            if len(content) == 0:
+                raise HTTPException(status_code=400, detail="Empty file")
+            tmp.write(content)
+            tmp_path = tmp.name
+    else:
+        raise HTTPException(status_code=400, detail="Provide either a file or preview_id")
 
     # Parse optional JSON parameters from form fields
     parsed_pages = None

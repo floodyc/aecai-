@@ -23,6 +23,60 @@ export interface TakeoffResults {
   txt_report: string;
 }
 
+export interface PagePreview {
+  page_number: number;
+  thumbnail: string; // base64 JPEG
+  is_legend: boolean;
+}
+
+export interface PreviewResponse {
+  preview_id: string;
+  total_pages: number;
+  pages: PagePreview[];
+}
+
+export async function previewPdf(file: File): Promise<PreviewResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_URL}/api/takeoff/preview`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Preview failed" }));
+    throw new Error(err.detail || "Preview failed");
+  }
+
+  return res.json();
+}
+
+export async function startTakeoff(
+  previewId: string,
+  pages?: number[]
+): Promise<JobResponse> {
+  const formData = new FormData();
+  formData.append("preview_id", previewId);
+  if (pages && pages.length > 0) {
+    formData.append("pages", JSON.stringify(pages));
+  }
+
+  const res = await fetch(`${API_URL}/api/takeoff`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res
+      .json()
+      .catch(() => ({ detail: "Failed to start takeoff" }));
+    throw new Error(err.detail || "Failed to start takeoff");
+  }
+
+  return res.json();
+}
+
 export async function uploadPdf(file: File): Promise<JobResponse> {
   const formData = new FormData();
   formData.append("file", file);

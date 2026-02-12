@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import UploadZone from "@/components/UploadZone";
-import { uploadPdf } from "@/lib/api";
+import PageSelector from "@/components/PageSelector";
+import { previewPdf, startTakeoff, PreviewResponse } from "@/lib/api";
 
 const planLabels: Record<string, string> = {
   trial: "Free Trial",
@@ -13,11 +14,16 @@ const planLabels: Record<string, string> = {
   enterprise: "Enterprise",
 };
 
+type Step = "upload" | "select-pages";
+
 export default function DashboardPage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
+  const [step, setStep] = useState<Step>("upload");
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewResponse | null>(null);
 
   // Redirect if not logged in
   if (!isLoading && !user) {
@@ -38,19 +44,50 @@ export default function DashboardPage() {
     setError(null);
 
     try {
-      const job = await uploadPdf(file);
-      router.push(`/takeoff/${job.id}`);
+      const previewData = await previewPdf(file);
+      setPreview(previewData);
+      setStep("select-pages");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
       setIsUploading(false);
     }
+  };
+
+  const handleProcess = async (selectedPages: number[] | null) => {
+    if (!preview) return;
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      const job = await startTakeoff(
+        preview.preview_id,
+        selectedPages ?? undefined
+      );
+      router.push(`/takeoff/${job.id}`);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to start processing"
+      );
+      setIsProcessing(false);
+    }
+  };
+
+  const handleBack = () => {
+    setStep("upload");
+    setPreview(null);
+    setError(null);
   };
 
   const atLimit =
     user.plan === "trial" && user.trial_uploads_remaining <= 0;
 
   return (
-    <div className="max-w-2xl mx-auto px-6 py-12">
+    <div
+      className={`mx-auto px-6 py-12 ${
+        step === "select-pages" ? "max-w-4xl" : "max-w-2xl"
+      }`}
+    >
       {/* Account Status Bar */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-8">
         <div className="flex items-center justify-between mb-4">
@@ -103,18 +140,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Upload Section */}
-      <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-50 mb-2">
-          Lighting Fixture Takeoff
-        </h1>
-        <p className="text-gray-400 text-sm">
-          Upload an electrical drawing PDF to automatically detect and count
-          lighting fixtures.
-        </p>
-      </div>
-
       {atLimit ? (
+        /* Trial exhausted */
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
           <div className="mx-auto w-14 h-14 rounded-full bg-amber-950/50 flex items-center justify-center mb-4">
             <svg
@@ -145,8 +172,19 @@ export default function DashboardPage() {
             View Plans & Upgrade
           </a>
         </div>
-      ) : (
+      ) : step === "upload" ? (
+        /* Step 1: Upload */
         <>
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-50 mb-2">
+              Lighting Fixture Takeoff
+            </h1>
+            <p className="text-gray-400 text-sm">
+              Upload an electrical drawing PDF to automatically detect and
+              count lighting fixtures.
+            </p>
+          </div>
+
           <UploadZone onUpload={handleUpload} isUploading={isUploading} />
 
           {error && (
@@ -161,24 +199,63 @@ export default function DashboardPage() {
               {user.trial_uploads_remaining !== 1 ? "s" : ""} remaining
             </p>
           )}
+
+          {/* Stats */}
+          <div className="mt-14 grid grid-cols-3 gap-6 text-center">
+            <div>
+              <div className="text-2xl font-bold text-primary-400 mb-1">
+                300
+              </div>
+              <div className="text-xs text-gray-500">DPI Rendering</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-primary-400 mb-1">
+                CV
+              </div>
+              <div className="text-xs text-gray-500">Oval Detection</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-primary-400 mb-1">
+                OCR
+              </div>
+              <div className="text-xs text-gray-500">Fuzzy Correction</div>
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Step 2: Select Pages */
+        <>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-50 mb-1">
+                Select Pages to Process
+              </h1>
+              <p className="text-gray-400 text-sm">
+                {preview!.total_pages} pages found. Choose which pages to
+                include in your takeoff.
+              </p>
+            </div>
+            <button
+              onClick={handleBack}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-xs font-medium text-gray-300 transition-colors"
+            >
+              Upload Different PDF
+            </button>
+          </div>
+
+          <PageSelector
+            pages={preview!.pages}
+            onProcess={handleProcess}
+            isProcessing={isProcessing}
+          />
+
+          {error && (
+            <div className="mt-4 p-3 bg-red-950/50 border border-red-900 rounded-lg text-sm text-red-300">
+              {error}
+            </div>
+          )}
         </>
       )}
-
-      {/* Stats */}
-      <div className="mt-14 grid grid-cols-3 gap-6 text-center">
-        <div>
-          <div className="text-2xl font-bold text-primary-400 mb-1">300</div>
-          <div className="text-xs text-gray-500">DPI Rendering</div>
-        </div>
-        <div>
-          <div className="text-2xl font-bold text-primary-400 mb-1">CV</div>
-          <div className="text-xs text-gray-500">Oval Detection</div>
-        </div>
-        <div>
-          <div className="text-2xl font-bold text-primary-400 mb-1">OCR</div>
-          <div className="text-xs text-gray-500">Fuzzy Correction</div>
-        </div>
-      </div>
     </div>
   );
 }

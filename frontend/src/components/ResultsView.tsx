@@ -24,6 +24,46 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
     URL.revokeObjectURL(url);
   };
 
+  const downloadCsv = () => {
+    const escape = (val: string | number) => {
+      const s = String(val);
+      return s.includes(",") || s.includes('"')
+        ? `"${s.replace(/"/g, '""')}"`
+        : s;
+    };
+
+    const header = ["Floor", ...types, "Total"];
+    const rows: string[][] = [];
+
+    for (const floor of floorNames) {
+      const counts = floors[floor];
+      const rowTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+      rows.push([
+        floor,
+        ...types.map((t) => String(counts[t] || 0)),
+        String(rowTotal),
+      ]);
+    }
+
+    // Building totals row
+    rows.push([
+      "Building Total",
+      ...types.map((t) => String(building_totals[t] || 0)),
+      String(summary.total_fixtures),
+    ]);
+
+    const csv =
+      [header, ...rows].map((r) => r.map(escape).join(",")).join("\n") + "\n";
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `aecai_takeoff_${jobId}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-8">
       {/* Summary Cards */}
@@ -131,7 +171,26 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
       </div>
 
       {/* Download Buttons */}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
+        <button
+          onClick={downloadCsv}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-500 rounded-lg text-sm font-semibold text-white transition-colors"
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+            />
+          </svg>
+          Export Spreadsheet (.csv)
+        </button>
         <a
           href={getReportUrl(jobId)}
           className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm font-medium text-gray-200 transition-colors"
