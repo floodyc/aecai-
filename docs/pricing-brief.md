@@ -45,21 +45,16 @@ Enterprise priced at ~$1,000/mo minimum for modelling purposes.
 
 ---
 
-## Key Decisions Still Needed
+## Additional Pricing Details
 
-1. **Overage pricing** — $25/page beyond the plan cap. No hard cutoff — customers can always finish a project, and overages are billed at end of cycle.
-
-2. **Annual discount** — Suggested 15% discount for annual commitment ($170/mo Standard, $425/mo Professional). Locks in revenue and reduces churn.
-
-3. **Free trial** — 3 PDF uploads per company, no time limit. Lets prospects run real drawings through the tool and see output quality before committing. Tied to company registration to prevent abuse.
-
-4. **Team pricing** — Not needed at launch, but plan for it. When a firm wants 5+ seats, offer a shared page pool at a volume discount.
+- **Overage:** $25/page beyond the plan cap. No hard cutoff — customers can always finish a project, overages billed at end of cycle.
+- **Annual discount:** 15% off for annual commitment — $170/mo Standard ($2,040/yr), $425/mo Professional ($5,100/yr). Locks in revenue and reduces churn.
+- **Free trial:** 3 PDF uploads per company, no time limit. Tied to company registration to prevent abuse.
 
 ---
 
 ## Next Steps
 
-- Finalize overage and annual pricing decisions
 - Implement auth, usage tracking, and payment integration (Stripe)
 - Build customer-facing pricing page
 - Prepare a 1-page sales sheet for outbound outreach to electrical engineering firms
