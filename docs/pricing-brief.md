@@ -51,7 +51,7 @@ Enterprise priced at ~$1,000/mo minimum for modelling purposes.
 
 2. **Annual discount** — Suggested 15% discount for annual commitment ($170/mo Standard, $425/mo Professional). Locks in revenue and reduces churn.
 
-3. **Trial period** — No free tier, but consider a 7-day trial or a single demo PDF upload so prospects can see output quality before buying.
+3. **Free trial** — 3 PDF uploads per company, no time limit. Lets prospects run real drawings through the tool and see output quality before committing. Tied to company registration to prevent abuse.
 
 4. **Team pricing** — Not needed at launch, but plan for it. When a firm wants 5+ seats, offer a shared page pool at a volume discount.
 
