@@ -1,0 +1,176 @@
+"use client";
+
+import { TakeoffResults, getReportUrl } from "@/lib/api";
+
+interface ResultsViewProps {
+  jobId: string;
+  results: TakeoffResults;
+}
+
+export default function ResultsView({ jobId, results }: ResultsViewProps) {
+  const { floors, building_totals, summary } = results;
+  const floorNames = Object.keys(floors);
+  const types = summary.luminaire_types;
+
+  const downloadJson = () => {
+    const blob = new Blob([JSON.stringify(results, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `aecai_results_${jobId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+            Total Fixtures
+          </p>
+          <p className="text-3xl font-bold text-primary-400">
+            {summary.total_fixtures.toLocaleString()}
+          </p>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+            Floors Processed
+          </p>
+          <p className="text-3xl font-bold text-gray-100">
+            {summary.num_floors}
+          </p>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+            Luminaire Types
+          </p>
+          <p className="text-3xl font-bold text-gray-100">{types.length}</p>
+        </div>
+      </div>
+
+      {/* Fixture Table */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-800">
+          <h3 className="font-semibold text-gray-100">
+            Fixture Count by Floor
+          </h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800 bg-gray-950/50">
+                <th className="text-left px-4 py-3 font-medium text-gray-400 sticky left-0 bg-gray-950/50">
+                  Floor
+                </th>
+                {types.map((t) => (
+                  <th
+                    key={t}
+                    className="text-right px-4 py-3 font-medium text-gray-400 whitespace-nowrap"
+                  >
+                    {t}
+                  </th>
+                ))}
+                <th className="text-right px-4 py-3 font-medium text-primary-400">
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {floorNames.map((floor) => {
+                const counts = floors[floor];
+                const rowTotal = Object.values(counts).reduce(
+                  (a, b) => a + b,
+                  0
+                );
+                return (
+                  <tr
+                    key={floor}
+                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
+                  >
+                    <td className="px-4 py-2.5 text-gray-200 font-medium sticky left-0 bg-gray-900">
+                      {floor}
+                    </td>
+                    {types.map((t) => (
+                      <td
+                        key={t}
+                        className="text-right px-4 py-2.5 text-gray-300 tabular-nums"
+                      >
+                        {counts[t] || "—"}
+                      </td>
+                    ))}
+                    <td className="text-right px-4 py-2.5 font-semibold text-gray-100 tabular-nums">
+                      {rowTotal}
+                    </td>
+                  </tr>
+                );
+              })}
+              {/* Building Totals Row */}
+              <tr className="bg-primary-950/30 border-t-2 border-primary-800">
+                <td className="px-4 py-3 font-bold text-primary-300 sticky left-0 bg-primary-950/30">
+                  Building Total
+                </td>
+                {types.map((t) => (
+                  <td
+                    key={t}
+                    className="text-right px-4 py-3 font-bold text-primary-300 tabular-nums"
+                  >
+                    {building_totals[t] || "—"}
+                  </td>
+                ))}
+                <td className="text-right px-4 py-3 font-bold text-primary-200 tabular-nums">
+                  {summary.total_fixtures.toLocaleString()}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Download Buttons */}
+      <div className="flex gap-3">
+        <a
+          href={getReportUrl(jobId)}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm font-medium text-gray-200 transition-colors"
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+          Download TXT Report
+        </a>
+        <button
+          onClick={downloadJson}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm font-medium text-gray-200 transition-colors"
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+            />
+          </svg>
+          Download JSON Data
+        </button>
+      </div>
+    </div>
+  );
+}
