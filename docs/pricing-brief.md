@@ -47,7 +47,7 @@ Enterprise priced at ~$1,000/mo minimum for modelling purposes.
 
 ## Key Decisions Still Needed
 
-1. **Overage pricing** — Do we charge per page beyond the cap (suggested: $25/page) or require an upgrade? Overage is better; it avoids cutting off a customer mid-project.
+1. **Overage pricing** — $25/page beyond the plan cap. No hard cutoff — customers can always finish a project, and overages are billed at end of cycle.
 
 2. **Annual discount** — Suggested 15% discount for annual commitment ($170/mo Standard, $425/mo Professional). Locks in revenue and reduces churn.
 
