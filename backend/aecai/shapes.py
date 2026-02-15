@@ -112,17 +112,21 @@ def find_ovals(
 def find_symbols(
     image: np.ndarray,
     *,
-    min_area: int = 400,
-    max_area: int = 20000,
-    min_aspect: float = 0.2,
-    max_aspect: float = 5.0,
-    min_circularity: float = 0.15,
+    min_area: int = 1500,
+    max_area: int = 25000,
+    min_dimension: int = 25,
+    min_aspect: float = 0.3,
+    max_aspect: float = 3.5,
+    min_circularity: float = 0.25,
 ) -> list[dict]:
     """Detect general enclosed shapes (circles, rectangles, hexagons, etc.).
 
     This is a broader detector than find_ovals(). It accepts any small enclosed
     contour that could plausibly be a fixture symbol, including rectangles and
     other non-circular shapes.
+
+    min_area=1500 and min_dimension=25 are set to skip individual text
+    characters (which are typically 200-1200 px² at 300 DPI).
 
     Returns the same dict format as find_ovals().
     """
@@ -146,6 +150,11 @@ def find_symbols(
             continue
 
         x, y, w, h = cv2.boundingRect(cnt)
+
+        # Skip shapes too small to be fixture symbols (likely text characters)
+        if w < min_dimension or h < min_dimension:
+            continue
+
         aspect = w / h if h > 0 else 0
         if aspect < min_aspect or aspect > max_aspect:
             continue
