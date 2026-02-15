@@ -2,8 +2,7 @@ services:
   - type: web
     name: aecai-api
     runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: ./backend
+    rootDir: backend
     envVars:
       - key: CORS_ORIGINS
         value: https://aecai.vercel.app,https://aecai-*.vercel.app,http://localhost:3000
