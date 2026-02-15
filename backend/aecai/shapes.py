@@ -1,11 +1,9 @@
 """Fixture symbol detection using OpenCV contour analysis.
 
-Provides two detectors:
-- find_ovals(): calibrated oval detector (original, strict circularity)
-- find_symbols(): general enclosed-shape detector (circles, rectangles, etc.)
-
-The pipeline tries find_ovals() first and falls back to find_symbols()
-when no ovals are found, supporting a wider variety of drawing styles.
+Detects oval/elliptical fixture symbols on electrical floor plans.
+Uses RETR_LIST to find ALL contours (not just outermost), which is
+critical for floor plans where fixture ovals are nested inside room
+outlines.
 """
 
 from __future__ import annotations
@@ -24,10 +22,6 @@ from .config import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Maximum symbols to keep from the general detector.
-# Prevents the OCR stage from hanging on busy drawings.
-MAX_GENERAL_DETECTIONS = 300
 
 
 def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -73,17 +67,23 @@ def find_ovals(
 ) -> list[dict]:
     """Detect oval contours in a grayscale or BGR image.
 
+    Uses RETR_LIST to find ALL contours regardless of nesting depth.
+    This is essential for floor plans where fixture ovals sit inside
+    room outlines and other enclosing shapes.
+
     Returns a list of dicts with keys:
         x, y, w, h  – bounding rectangle
         cx, cy       – centre point
         area         – contour area
-        circularity  – 4π·area / perimeter²
-
-    Parameters are calibrated — do not change the detection thresholds
-    without re-testing against real drawings.
+        circularity  – 4*pi*area / perimeter^2
     """
     _, binary = _binarize(image)
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # RETR_LIST finds ALL contours (not just outermost). Critical for floor
+    # plans where small fixture ovals are nested inside room boundaries.
+    contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+    logger.info("  Total contours found: %d", len(contours))
 
     ovals: list[dict] = []
     for cnt in contours:
@@ -104,82 +104,17 @@ def find_ovals(
         if aspect < min_aspect or aspect > max_aspect:
             continue
 
+        # Skip very large shapes (room outlines, title blocks)
+        if w > 200 or h > 200:
+            continue
+
         ovals.append(_contour_to_dict(cnt, area, circularity))
 
+    # De-duplicate overlapping detections (nested contours can produce
+    # near-identical bounding boxes)
+    ovals = _deduplicate(ovals)
+
     return ovals
-
-
-def find_symbols(
-    image: np.ndarray,
-    *,
-    min_area: int = 1500,
-    max_area: int = 25000,
-    min_dimension: int = 25,
-    min_aspect: float = 0.3,
-    max_aspect: float = 3.5,
-    min_circularity: float = 0.25,
-) -> list[dict]:
-    """Detect general enclosed shapes (circles, rectangles, hexagons, etc.).
-
-    This is a broader detector than find_ovals(). It accepts any small enclosed
-    contour that could plausibly be a fixture symbol, including rectangles and
-    other non-circular shapes.
-
-    min_area=1500 and min_dimension=25 are set to skip individual text
-    characters (which are typically 200-1200 px² at 300 DPI).
-
-    Returns the same dict format as find_ovals().
-    """
-    _, binary = _binarize(image)
-
-    # Use RETR_TREE to catch nested contours (symbols inside title blocks, etc.)
-    contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-    symbols: list[dict] = []
-    for i, cnt in enumerate(contours):
-        area = cv2.contourArea(cnt)
-        if area < min_area or area > max_area:
-            continue
-
-        perimeter = cv2.arcLength(cnt, True)
-        if perimeter == 0:
-            continue
-
-        circularity = 4 * np.pi * area / (perimeter * perimeter)
-        if circularity < min_circularity:
-            continue
-
-        x, y, w, h = cv2.boundingRect(cnt)
-
-        # Skip shapes too small to be fixture symbols (likely text characters)
-        if w < min_dimension or h < min_dimension:
-            continue
-
-        aspect = w / h if h > 0 else 0
-        if aspect < min_aspect or aspect > max_aspect:
-            continue
-
-        # Skip very large contours that are likely room outlines or title blocks
-        if w > 300 or h > 300:
-            continue
-
-        symbols.append(_contour_to_dict(cnt, area, circularity))
-
-    # De-duplicate overlapping detections: keep the smaller (inner) one
-    symbols = _deduplicate(symbols)
-
-    # Cap to prevent OCR stage from hanging on very busy drawings
-    if len(symbols) > MAX_GENERAL_DETECTIONS:
-        logger.warning(
-            "  General detector found %d shapes, capping to %d. "
-            "Consider raising min_area or min_circularity.",
-            len(symbols), MAX_GENERAL_DETECTIONS,
-        )
-        # Keep detections with highest circularity (most likely to be symbols)
-        symbols.sort(key=lambda d: d["circularity"], reverse=True)
-        symbols = symbols[:MAX_GENERAL_DETECTIONS]
-
-    return symbols
 
 
 def _deduplicate(detections: list[dict], iou_thresh: float = 0.5) -> list[dict]:
