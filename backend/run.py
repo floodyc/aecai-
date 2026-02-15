@@ -2,11 +2,14 @@
 
 Usage: python run.py
 """
+import os
 import sys
 from pathlib import Path
 
-# Ensure the backend directory is on Python's path
-sys.path.insert(0, str(Path(__file__).parent))
+# Set PYTHONPATH as env var so uvicorn's reload subprocess inherits it
+backend_dir = str(Path(__file__).parent)
+os.environ["PYTHONPATH"] = backend_dir
+sys.path.insert(0, backend_dir)
 
 import uvicorn
 
