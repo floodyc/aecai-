@@ -17,11 +17,14 @@ export interface PageDiagnostics {
   detection_method?: string;
   shapes_found?: number;
   shapes_matched?: number;
+  text_matches?: number;
   raw_ocr_samples?: string[];
 }
 
 export interface Diagnostics {
   legend_page: number | null;
+  legend_image?: boolean;
+  legend_source?: string;
   legend_codes: string[];
   used_default_codes: boolean;
   active_codes: string[];

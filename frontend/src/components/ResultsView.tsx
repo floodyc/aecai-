@@ -209,7 +209,21 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                 <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
                   Symbol Legend
                 </p>
-                {diagnostics.legend_page ? (
+                {diagnostics.legend_source === "uploaded_image" ? (
+                  <p className="text-gray-300">
+                    Uploaded legend image — extracted{" "}
+                    <span className="font-semibold text-primary-400">
+                      {diagnostics.legend_codes.length}
+                    </span>{" "}
+                    fixture codes
+                    {diagnostics.legend_codes.length > 0 && (
+                      <span className="text-gray-500">
+                        {" "}
+                        ({diagnostics.legend_codes.join(", ")})
+                      </span>
+                    )}
+                  </p>
+                ) : diagnostics.legend_page ? (
                   <p className="text-gray-300">
                     Page {diagnostics.legend_page} — extracted{" "}
                     <span className="font-semibold text-primary-400">
@@ -231,7 +245,7 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                   </p>
                 ) : (
                   <p className="text-amber-400">
-                    No legend page selected — used default codes (LT01–LT20)
+                    No legend provided — used default codes (LT01–LT20)
                   </p>
                 )}
               </div>
@@ -272,6 +286,21 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                           {info.status === "skipped" ? (
                             <span className="text-xs text-gray-500">
                               Skipped
+                            </span>
+                          ) : info.detection_method === "text_search" ? (
+                            <span className="text-xs text-gray-400">
+                              <span className="text-gray-600 mr-1.5">
+                                [text search]
+                              </span>
+                              <span
+                                className={
+                                  (info.text_matches ?? 0) === 0
+                                    ? "text-amber-400"
+                                    : "text-green-400"
+                                }
+                              >
+                                {info.text_matches ?? 0} codes found
+                              </span>
                             </span>
                           ) : (
                             <span className="text-xs text-gray-400">
@@ -316,18 +345,20 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                             </div>
                           )}
                         {info.status !== "skipped" &&
-                          info.shapes_found === 0 && (
-                            <p className="text-xs text-red-400 mt-1">
-                              No shapes detected on this page. The drawing
-                              may use symbol types not yet supported.
+                          info.detection_method === "text_search" &&
+                          (info.text_matches ?? 0) === 0 && (
+                            <p className="text-xs text-amber-400 mt-1">
+                              No fixture codes found on this page. Check that
+                              the legend image contains the correct codes.
                             </p>
                           )}
                         {info.status !== "skipped" &&
+                          info.detection_method === "ovals" &&
                           (info.shapes_found ?? 0) > 0 &&
                           info.shapes_matched === 0 && (
                             <p className="text-xs text-amber-400 mt-1">
                               Shapes found but no OCR text matched the legend
-                              codes. Check that the correct legend page is selected.
+                              codes. Check that the correct legend is selected.
                             </p>
                           )}
                       </div>

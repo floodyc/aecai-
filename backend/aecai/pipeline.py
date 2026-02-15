@@ -17,9 +17,9 @@ from pdf2image import convert_from_path
 
 from .config import DEFAULT_SHEET_MAP, DEFAULT_TYPICAL_MULTIPLIERS, DPI, KNOWN_LUMINAIRES, POPPLER_PATH
 from .legend import parse_legend_page
-from .ocr import recognize_fixtures
+from .ocr import recognize_fixtures, scan_page_for_codes
 from .report import build_results_json, generate_txt_report
-from .shapes import find_ovals, find_symbols
+from .shapes import find_ovals
 
 logger = logging.getLogger(__name__)
 
@@ -170,37 +170,40 @@ def run_takeoff(
         if progress_callback:
             progress_callback(idx + 1, total_pages, f"Processing {floor_name}")
 
-        # Detect shapes: try calibrated oval detector first, fall back to general
+        # Strategy 1: try calibrated oval detector (works for oval-symbol drawings)
         ovals = find_ovals(image)
-        detection_method = "ovals"
 
-        if not ovals:
-            # Oval detector found nothing — try the general shape detector
-            ovals = find_symbols(image)
-            detection_method = "general"
-            logger.info("  Oval detector found 0, general detector found %d symbols on %s", len(ovals), floor_name)
-        else:
+        if ovals:
+            detection_method = "ovals"
             logger.info("  Found %d ovals on %s", len(ovals), floor_name)
+            detections = recognize_fixtures(image, ovals, known=known_codes)
+            recognised = [d for d in detections if d["fixture"] is not None]
+            logger.info("  Recognised %d/%d fixtures", len(recognised), len(ovals))
 
-        # OCR each detected shape using project-specific codes
-        detections = recognize_fixtures(image, ovals, known=known_codes)
-        recognised = [d for d in detections if d["fixture"] is not None]
-        logger.info("  Recognised %d/%d fixtures", len(recognised), len(ovals))
+            raw_samples = [d["raw_text"] for d in detections if d["raw_text"]][:15]
+            diagnostics["pages"][floor_name] = {
+                "status": "processed",
+                "detection_method": detection_method,
+                "shapes_found": len(ovals),
+                "shapes_matched": len(recognised),
+                "raw_ocr_samples": raw_samples,
+            }
+            page_results[floor_name] = detections
+        else:
+            # Strategy 2: full-page text search — scan for text matching legend codes
+            detection_method = "text_search"
+            logger.info("  No ovals found on %s, using full-page text search", floor_name)
+            detections = scan_page_for_codes(image, known_codes)
+            recognised = detections  # all results are matches by definition
 
-        # Collect raw OCR samples for diagnostics (first 15)
-        raw_samples = [
-            d["raw_text"] for d in detections if d["raw_text"]
-        ][:15]
-
-        diagnostics["pages"][floor_name] = {
-            "status": "processed",
-            "detection_method": detection_method,
-            "shapes_found": len(ovals),
-            "shapes_matched": len(recognised),
-            "raw_ocr_samples": raw_samples,
-        }
-
-        page_results[floor_name] = detections
+            raw_samples = [d["raw_text"] for d in detections][:15]
+            diagnostics["pages"][floor_name] = {
+                "status": "processed",
+                "detection_method": detection_method,
+                "text_matches": len(detections),
+                "raw_ocr_samples": raw_samples,
+            }
+            page_results[floor_name] = detections
 
     # Aggregate counts
     floor_counts: dict[str, Counter] = {}

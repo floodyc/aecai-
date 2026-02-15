@@ -200,20 +200,22 @@ async def start_takeoff(
 
     # Save legend image if uploaded
     legend_image_path: str | None = None
-    if legend_image and legend_image.filename:
-        img_suffix = Path(legend_image.filename).suffix or ".png"
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=img_suffix, prefix="aecai_legend_"
-        ) as tmp:
-            img_content = await legend_image.read()
-            if len(img_content) > 0:
+    if legend_image is not None:
+        # FastAPI may deliver an empty UploadFile when the field is absent;
+        # read the bytes to determine if there's real content.
+        img_content = await legend_image.read()
+        if img_content and len(img_content) > 0:
+            img_suffix = Path(legend_image.filename or "legend.png").suffix or ".png"
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=img_suffix, prefix="aecai_legend_"
+            ) as tmp:
                 tmp.write(img_content)
                 legend_image_path = tmp.name
-                import logging
-                logging.getLogger(__name__).info(
-                    "Saved legend image (%d bytes) to %s",
-                    len(img_content), legend_image_path,
-                )
+            import logging
+            logging.getLogger(__name__).info(
+                "Saved legend image (%d bytes, name=%s) to %s",
+                len(img_content), legend_image.filename, legend_image_path,
+            )
 
     # Parse optional JSON parameters from form fields
     parsed_pages = None

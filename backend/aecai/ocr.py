@@ -1,14 +1,16 @@
-"""OCR module – crops each detected oval, runs Tesseract, and fuzzy-corrects.
+"""OCR module – two detection strategies for fixture codes on floor plans.
 
-The pipeline:
-1. Centre-crop around each oval to remove border artefacts
-2. Pre-process (resize, threshold) for better Tesseract accuracy
-3. Run Tesseract in single-word mode (PSM 8)
-4. Fuzzy-match raw text against known luminaire codes
+Strategy 1 (shape-based): crops each detected oval, runs Tesseract PSM 8,
+fuzzy-matches against known codes. Works for drawings with oval symbols.
+
+Strategy 2 (text-search): full-page OCR with word bounding boxes, then
+filters words that match known fixture codes. Works for any drawing style.
+The legend drives what codes to keep.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 
 import cv2
@@ -19,6 +21,7 @@ from thefuzz import fuzz
 from .config import CROP_PADDING, FUZZY_THRESHOLD, KNOWN_LUMINAIRES, TESSERACT_CMD
 
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+logger = logging.getLogger(__name__)
 
 
 def crop_oval(image: np.ndarray, oval: dict, padding: int = CROP_PADDING) -> np.ndarray:
@@ -133,4 +136,76 @@ def recognize_fixtures(
                 "fixture": fixture,
             }
         )
+    return results
+
+
+def scan_page_for_codes(
+    image: np.ndarray,
+    known_codes: list[str],
+    threshold: int = FUZZY_THRESHOLD,
+) -> list[dict]:
+    """Full-page OCR: find all text on the page that matches known fixture codes.
+
+    Instead of detecting shapes first, this scans the entire page for text and
+    keeps only words that fuzzy-match a code from the legend. The legend drives
+    what counts as a fixture.
+
+    Args:
+        image: the full page image (BGR or grayscale)
+        known_codes: fixture codes extracted from the legend
+        threshold: minimum fuzz ratio to accept a match
+
+    Returns a list of dicts:
+        raw_text – the OCR'd word
+        fixture  – matched fixture code
+        x, y, w, h – bounding box of the word on the page
+    """
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+
+    # Get word-level bounding boxes from Tesseract (PSM 6 = block of text)
+    data = pytesseract.image_to_data(
+        gray,
+        config="--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- ",
+        output_type=pytesseract.Output.DICT,
+    )
+
+    results: list[dict] = []
+    n_words = len(data["text"])
+
+    for i in range(n_words):
+        raw = data["text"][i].strip()
+        if not raw or len(raw) < 2:
+            continue
+
+        # Clean: strip non-alphanumeric, uppercase
+        cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+        if not cleaned or len(cleaned) < 2:
+            continue
+
+        # Fuzzy-match against every known code
+        best_match = None
+        best_score = 0
+        for code in known_codes:
+            score = fuzz.ratio(cleaned, code)
+            if score > best_score:
+                best_score = score
+                best_match = code
+
+        if best_score >= threshold and best_match is not None:
+            results.append(
+                {
+                    "raw_text": raw,
+                    "fixture": best_match,
+                    "x": data["left"][i],
+                    "y": data["top"][i],
+                    "w": data["width"][i],
+                    "h": data["height"][i],
+                    "score": best_score,
+                }
+            )
+
+    logger.info("  Text search found %d code matches on page", len(results))
     return results
