@@ -127,17 +127,6 @@ def fuzzy_correct(raw_text: str, known: list[str] | None = None, threshold: int 
     return None
 
 
-def _looks_like_fixture_code(text: str) -> bool:
-    """Check if cleaned text looks like a luminaire code (letters + digits).
-
-    Fixture codes have letters AND numbers (e.g. LT04, LT04A).
-    Bare numbers (04, 12) or bare letters (AB) are not fixture codes.
-    """
-    has_letter = any(c.isalpha() for c in text)
-    has_digit = any(c.isdigit() for c in text)
-    return has_letter and has_digit and len(text) >= 2
-
-
 def recognize_fixtures(
     image: np.ndarray,
     ovals: list[dict],
@@ -145,9 +134,10 @@ def recognize_fixtures(
 ) -> list[dict]:
     """OCR all detected ovals and return fixture identifications.
 
-    Only ovals whose text looks like a fixture code (letters + numbers)
-    are counted. Fuzzy matching against known codes corrects OCR errors
-    (e.g. "LTO4" → "LT04").
+    Any oval with readable text is counted as a fixture. The text inside
+    can be numbers only (e.g. "30"), letters+numbers (e.g. "LT04"), or
+    any alphanumeric code. Fuzzy matching against known codes is used
+    for OCR correction when available.
 
     Args:
         image: the page image (BGR or grayscale)
@@ -158,7 +148,7 @@ def recognize_fixtures(
     Returns a list of dicts:
         oval     – original oval dict
         raw_text – Tesseract output before correction
-        fixture  – corrected/cleaned code, or None if not a fixture
+        fixture  – corrected/cleaned code, or None if oval had no text
     """
     results = []
     for oval in ovals:
@@ -171,10 +161,11 @@ def recognize_fixtures(
         # Try fuzzy correction against known codes
         fixture = fuzzy_correct(raw, known=known)
 
-        # If no fuzzy match, check if raw text looks like a fixture code
+        # If no fuzzy match, use the cleaned raw text directly
+        # Accept any alphanumeric text (numbers like "30" or codes like "LT04")
         if fixture is None and raw:
             cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
-            if _looks_like_fixture_code(cleaned):
+            if cleaned:
                 fixture = cleaned
 
         results.append(
