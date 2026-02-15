@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 from pdf2image import convert_from_path
 
-from .config import DEFAULT_SHEET_MAP, DEFAULT_TYPICAL_MULTIPLIERS, DPI, KNOWN_LUMINAIRES, POPPLER_PATH
+from .config import DPI, KNOWN_LUMINAIRES, POPPLER_PATH
 from .legend import parse_legend_page
 from .ocr import recognize_fixtures
 from .report import build_results_json, generate_txt_report
@@ -88,8 +88,11 @@ def run_takeoff(
     Returns:
         Full results dict from build_results_json, plus "txt_report" key.
     """
-    sheet_map = sheet_map or DEFAULT_SHEET_MAP
-    multipliers = multipliers if multipliers is not None else DEFAULT_TYPICAL_MULTIPLIERS
+    # Only use default sheet map if explicitly provided; otherwise use generic
+    # page names so we never accidentally skip floor plan pages on other PDFs.
+    user_provided_map = sheet_map is not None
+    sheet_map = sheet_map or {}
+    multipliers = multipliers if multipliers is not None else {}
 
     # Diagnostics: collect debug info about each pipeline stage
     diagnostics: dict[str, Any] = {
@@ -167,8 +170,9 @@ def run_takeoff(
     for idx, (page_num, image) in enumerate(zip(page_numbers, images)):
         floor_name = sheet_map.get(page_num, f"Page {page_num}")
 
-        # Skip non-plan pages ONLY when processing all pages (no explicit selection)
-        if not pages and floor_name in ("Cover", "Legend", "Site Plan"):
+        # Skip non-plan pages ONLY when the user explicitly provided a sheet map
+        # that labels them as Cover/Legend/Site Plan.  Never skip with generic names.
+        if not pages and user_provided_map and floor_name in ("Cover", "Legend", "Site Plan"):
             logger.info("Skipping %s (page %d)", floor_name, page_num)
             diagnostics["pages"][floor_name] = {"status": "skipped"}
             if progress_callback:
