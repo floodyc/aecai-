@@ -211,11 +211,11 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                 </p>
                 {diagnostics.legend_source === "uploaded_image" ? (
                   <p className="text-gray-300">
-                    Uploaded legend image — extracted{" "}
+                    Uploaded legend image — learned{" "}
                     <span className="font-semibold text-primary-400">
-                      {diagnostics.legend_codes.length}
+                      {diagnostics.templates_extracted ?? diagnostics.legend_codes.length}
                     </span>{" "}
-                    fixture codes
+                    symbol templates
                     {diagnostics.legend_codes.length > 0 && (
                       <span className="text-gray-500">
                         {" "}
@@ -287,6 +287,21 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                             <span className="text-xs text-gray-500">
                               Skipped
                             </span>
+                          ) : info.detection_method === "template_match" ? (
+                            <span className="text-xs text-gray-400">
+                              <span className="text-gray-600 mr-1.5">
+                                [template match]
+                              </span>
+                              <span
+                                className={
+                                  (info.template_matches ?? 0) === 0
+                                    ? "text-amber-400"
+                                    : "text-green-400"
+                                }
+                              >
+                                {info.template_matches ?? 0} symbols found
+                              </span>
+                            </span>
                           ) : info.detection_method === "text_search" ? (
                             <span className="text-xs text-gray-400">
                               <span className="text-gray-600 mr-1.5">
@@ -335,7 +350,9 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                           info.raw_ocr_samples.length > 0 && (
                             <div className="mt-1.5">
                               <span className="text-[10px] text-gray-500 uppercase">
-                                Raw OCR samples:{" "}
+                                {info.detection_method === "template_match"
+                                  ? "Match samples: "
+                                  : "Raw OCR samples: "}
                               </span>
                               <span className="text-xs text-gray-400 font-mono">
                                 {info.raw_ocr_samples

@@ -18,6 +18,7 @@ export interface PageDiagnostics {
   shapes_found?: number;
   shapes_matched?: number;
   text_matches?: number;
+  template_matches?: number;
   raw_ocr_samples?: string[];
 }
 
@@ -28,6 +29,7 @@ export interface Diagnostics {
   legend_codes: string[];
   used_default_codes: boolean;
   active_codes: string[];
+  templates_extracted?: number;
   pages: Record<string, PageDiagnostics>;
 }
 

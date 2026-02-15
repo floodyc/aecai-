@@ -1,7 +1,13 @@
 """End-to-end takeoff pipeline – converts a PDF into structured fixture counts.
 
-This is the main orchestrator that ties together PDF rendering, oval detection,
+This is the main orchestrator that ties together PDF rendering, symbol detection,
 OCR, and report generation.  The web API calls this module.
+
+Detection strategies (tried in order):
+1. Template matching – if a legend image is provided, extract symbol templates
+   from the legend and use OpenCV matchTemplate to find them on floor plans.
+2. Oval detection – calibrated contour detector for oval-symbol drawings.
+3. Text search – full-page OCR filtered by legend codes.
 """
 
 from __future__ import annotations
@@ -16,10 +22,11 @@ import numpy as np
 from pdf2image import convert_from_path
 
 from .config import DEFAULT_SHEET_MAP, DEFAULT_TYPICAL_MULTIPLIERS, DPI, KNOWN_LUMINAIRES, POPPLER_PATH
-from .legend import parse_legend_page
+from .legend import extract_symbol_templates, parse_legend_page
 from .ocr import recognize_fixtures, scan_page_for_codes
 from .report import build_results_json, generate_txt_report
 from .shapes import find_ovals
+from .symbol_match import match_templates_on_page
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +82,6 @@ def run_takeoff(
         sheet_map: page_number → floor_name mapping
         multipliers: floor_name → multiplier for typical floors
         legend_page: 1-based page number of the symbol legend sheet.
-                     If provided, that page is OCR'd first to extract
-                     project-specific fixture codes for fuzzy matching.
         legend_image_path: path to a user-uploaded image (PNG/JPG) of the
                           lighting fixture legend table. Takes priority over
                           legend_page when both are provided.
@@ -97,41 +102,65 @@ def run_takeoff(
         "pages": {},
     }
 
-    # --- Parse legend for project-specific fixture codes ---
+    # --- Parse legend: extract symbol templates AND fixture codes ---
+    symbol_templates: list[dict] = []
     known_codes: list[str] | None = None
 
-    # Priority 1: user-uploaded legend image (snapshot of the lighting table)
+    # Priority 1: user-uploaded legend image
     if legend_image_path:
-        logger.info("Parsing uploaded legend image for fixture codes...")
+        logger.info("Parsing uploaded legend image...")
         if progress_callback:
-            progress_callback(0, 0, "Reading legend image...")
+            progress_callback(0, 0, "Learning symbols from legend...")
         legend_img = cv2.imread(str(legend_image_path))
         if legend_img is not None:
-            known_codes = parse_legend_page(legend_img)
-            diagnostics["legend_codes"] = known_codes or []
-            diagnostics["legend_source"] = "uploaded_image"
-            logger.info("  Extracted %d fixture codes from legend image: %s",
-                        len(known_codes or []), known_codes)
+            # Extract graphical templates + codes
+            symbol_templates = extract_symbol_templates(legend_img)
+            if symbol_templates:
+                known_codes = [t["code"] for t in symbol_templates]
+                diagnostics["legend_codes"] = known_codes
+                diagnostics["legend_source"] = "uploaded_image"
+                diagnostics["templates_extracted"] = len(symbol_templates)
+                logger.info("  Extracted %d symbol templates: %s",
+                            len(symbol_templates), known_codes)
+            else:
+                # Template extraction failed — fall back to code extraction
+                logger.warning("  No symbol templates found, trying code-only extraction...")
+                known_codes = parse_legend_page(legend_img)
+                if known_codes:
+                    diagnostics["legend_codes"] = known_codes
+                    diagnostics["legend_source"] = "uploaded_image"
+                    logger.info("  Extracted %d codes (no templates): %s",
+                                len(known_codes), known_codes)
+
         if not known_codes:
-            logger.warning("  No codes found in legend image, trying legend page...")
+            logger.warning("  Legend image produced no codes, trying legend page...")
 
     # Priority 2: legend page from the PDF
-    if known_codes is None and legend_page:
-        logger.info("Parsing legend page %d for fixture codes...", legend_page)
+    if not known_codes and legend_page:
+        logger.info("Parsing legend page %d...", legend_page)
         if progress_callback:
             progress_callback(0, 0, "Reading symbol legend...")
         legend_images = pdf_to_images(pdf_path, pages=[legend_page])
         if legend_images:
-            known_codes = parse_legend_page(legend_images[0])
-            diagnostics["legend_codes"] = known_codes or []
-            diagnostics["legend_source"] = "pdf_page"
-            logger.info("  Extracted %d fixture codes from legend: %s", len(known_codes or []), known_codes)
+            # Try template extraction from PDF legend page too
+            if not symbol_templates:
+                symbol_templates = extract_symbol_templates(legend_images[0])
+                if symbol_templates:
+                    known_codes = [t["code"] for t in symbol_templates]
+                    diagnostics["legend_codes"] = known_codes
+                    diagnostics["legend_source"] = "pdf_page"
+                    diagnostics["templates_extracted"] = len(symbol_templates)
+
+            if not known_codes:
+                known_codes = parse_legend_page(legend_images[0])
+                diagnostics["legend_codes"] = known_codes or []
+                diagnostics["legend_source"] = "pdf_page"
+
         if not known_codes:
             logger.warning("  No codes found on legend page, falling back to defaults")
-            known_codes = None
 
-    # Fall back to built-in list if no legend provided or parsing found nothing
-    if known_codes is None:
+    # Fall back to built-in list if nothing worked
+    if not known_codes:
         known_codes = KNOWN_LUMINAIRES
         diagnostics["used_default_codes"] = True
         diagnostics["legend_source"] = "defaults"
@@ -149,7 +178,6 @@ def run_takeoff(
 
     # Ensure we have the right count
     if len(images) != len(page_numbers):
-        # When specifying a range, pdf2image returns all pages in range
         page_numbers = list(range(min(page_numbers), min(page_numbers) + len(images)))
 
     page_results: dict[str, list[dict]] = {}
@@ -170,9 +198,26 @@ def run_takeoff(
         if progress_callback:
             progress_callback(idx + 1, total_pages, f"Processing {floor_name}")
 
-        # Strategy 1: try calibrated oval detector (works for oval-symbol drawings)
-        ovals = find_ovals(image)
+        # --- Strategy 1: Template matching (when we have templates from legend) ---
+        if symbol_templates:
+            detection_method = "template_match"
+            logger.info("  Using template matching (%d templates) on %s",
+                        len(symbol_templates), floor_name)
+            detections = match_templates_on_page(image, symbol_templates)
 
+            raw_samples = [f"{d['code']}@({d['x']},{d['y']}) s={d['score']:.2f}"
+                           for d in detections][:15]
+            diagnostics["pages"][floor_name] = {
+                "status": "processed",
+                "detection_method": detection_method,
+                "template_matches": len(detections),
+                "raw_ocr_samples": raw_samples,
+            }
+            page_results[floor_name] = detections
+            continue
+
+        # --- Strategy 2: Oval detection (calibrated for oval-symbol drawings) ---
+        ovals = find_ovals(image)
         if ovals:
             detection_method = "ovals"
             logger.info("  Found %d ovals on %s", len(ovals), floor_name)
@@ -189,29 +234,30 @@ def run_takeoff(
                 "raw_ocr_samples": raw_samples,
             }
             page_results[floor_name] = detections
-        else:
-            # Strategy 2: full-page text search — scan for text matching legend codes
-            detection_method = "text_search"
-            logger.info("  No ovals found on %s, using full-page text search", floor_name)
-            detections = scan_page_for_codes(image, known_codes)
-            recognised = detections  # all results are matches by definition
+            continue
 
-            raw_samples = [d["raw_text"] for d in detections][:15]
-            diagnostics["pages"][floor_name] = {
-                "status": "processed",
-                "detection_method": detection_method,
-                "text_matches": len(detections),
-                "raw_ocr_samples": raw_samples,
-            }
-            page_results[floor_name] = detections
+        # --- Strategy 3: Full-page text search ---
+        detection_method = "text_search"
+        logger.info("  No ovals found on %s, using full-page text search", floor_name)
+        detections = scan_page_for_codes(image, known_codes)
+
+        raw_samples = [d["raw_text"] for d in detections][:15]
+        diagnostics["pages"][floor_name] = {
+            "status": "processed",
+            "detection_method": detection_method,
+            "text_matches": len(detections),
+            "raw_ocr_samples": raw_samples,
+        }
+        page_results[floor_name] = detections
 
     # Aggregate counts
     floor_counts: dict[str, Counter] = {}
     for floor_name, detections in page_results.items():
         counter: Counter = Counter()
         for det in detections:
-            if det["fixture"]:
-                counter[det["fixture"]] += 1
+            code = det.get("fixture") or det.get("code")
+            if code:
+                counter[code] += 1
         if counter:
             floor_counts[floor_name] = counter
 
