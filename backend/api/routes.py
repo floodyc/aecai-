@@ -11,7 +11,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from pdf2image import convert_from_path
 from pydantic import BaseModel
@@ -166,29 +166,41 @@ async def preview_pdf(file: UploadFile):
 
 
 @router.post("/takeoff", response_model=JobResponse)
-async def start_takeoff(
-    file: UploadFile | None = File(None),
-    legend_image: UploadFile | None = File(None),
-    preview_id: str | None = Form(None),
-    pages: str | None = Form(None),
-    sheet_map: str | None = Form(None),
-    multipliers: str | None = Form(None),
-    legend_page: str | None = Form(None),
-):
+async def start_takeoff(request: Request):
     """Start a takeoff job.
 
     Either upload a new PDF (file) or reference a previously previewed one
     (preview_id). Optionally upload a legend_image (PNG/JPG snapshot of the
     lighting fixture legend table). Poll GET /api/takeoff/{job_id} for status.
+
+    Uses manual form parsing to reliably handle optional file uploads.
     """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    form = await request.form()
+
+    # Extract form fields
+    preview_id = form.get("preview_id")
+    pages = form.get("pages")
+    sheet_map = form.get("sheet_map")
+    multipliers = form.get("multipliers")
+    legend_page = form.get("legend_page")
+    file = form.get("file")
+    legend_image = form.get("legend_image")
+
+    _log.info("Takeoff request: preview_id=%s, legend_image=%s (type=%s)",
+              preview_id, legend_image, type(legend_image).__name__)
+
     tmp_path: str | None = None
 
-    if preview_id and preview_id in _preview_files:
-        tmp_path = _preview_files.pop(preview_id)
-    elif file:
-        if not file.filename or not file.filename.lower().endswith(".pdf"):
+    if preview_id and str(preview_id) in _preview_files:
+        tmp_path = _preview_files.pop(str(preview_id))
+    elif file and hasattr(file, "read"):
+        filename = getattr(file, "filename", "") or ""
+        if not filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
-        suffix = Path(file.filename).suffix
+        suffix = Path(filename).suffix
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="aecai_") as tmp:
             content = await file.read()
             if len(content) == 0:
@@ -200,52 +212,55 @@ async def start_takeoff(
 
     # Save legend image if uploaded
     legend_image_path: str | None = None
-    if legend_image is not None:
-        # FastAPI may deliver an empty UploadFile when the field is absent;
-        # read the bytes to determine if there's real content.
+    if legend_image and hasattr(legend_image, "read"):
         img_content = await legend_image.read()
+        _log.info("Legend image received: %d bytes, filename=%s",
+                  len(img_content), getattr(legend_image, "filename", "?"))
         if img_content and len(img_content) > 0:
-            img_suffix = Path(legend_image.filename or "legend.png").suffix or ".png"
+            img_suffix = Path(getattr(legend_image, "filename", "legend.png") or "legend.png").suffix or ".png"
             with tempfile.NamedTemporaryFile(
                 delete=False, suffix=img_suffix, prefix="aecai_legend_"
             ) as tmp:
                 tmp.write(img_content)
                 legend_image_path = tmp.name
-            import logging
-            logging.getLogger(__name__).info(
-                "Saved legend image (%d bytes, name=%s) to %s",
-                len(img_content), legend_image.filename, legend_image_path,
-            )
+            _log.info("Saved legend image to %s", legend_image_path)
+    else:
+        _log.info("No legend image in form data (legend_image=%s)", legend_image)
 
-    # Parse optional JSON parameters from form fields
+    # Parse optional JSON parameters from form fields (cast to str first)
+    pages_str = str(pages) if pages else None
+    sheet_map_str = str(sheet_map) if sheet_map else None
+    multipliers_str = str(multipliers) if multipliers else None
+    legend_page_str = str(legend_page) if legend_page else None
+
     parsed_pages = None
     parsed_sheet_map = None
     parsed_multipliers = None
 
-    if pages:
+    if pages_str:
         try:
-            parsed_pages = json.loads(pages)
+            parsed_pages = json.loads(pages_str)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid pages JSON")
 
-    if sheet_map:
+    if sheet_map_str:
         try:
-            raw = json.loads(sheet_map)
+            raw = json.loads(sheet_map_str)
             parsed_sheet_map = {int(k): v for k, v in raw.items()}
         except (json.JSONDecodeError, ValueError):
             raise HTTPException(status_code=400, detail="Invalid sheet_map JSON")
 
-    if multipliers:
+    if multipliers_str:
         try:
-            raw = json.loads(multipliers)
+            raw = json.loads(multipliers_str)
             parsed_multipliers = {str(k): int(v) for k, v in raw.items()}
         except (json.JSONDecodeError, ValueError):
             raise HTTPException(status_code=400, detail="Invalid multipliers JSON")
 
     parsed_legend_page = None
-    if legend_page:
+    if legend_page_str:
         try:
-            parsed_legend_page = int(legend_page)
+            parsed_legend_page = int(legend_page_str)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid legend_page value")
 

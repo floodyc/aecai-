@@ -186,8 +186,9 @@ def run_takeoff(
     for idx, (page_num, image) in enumerate(zip(page_numbers, images)):
         floor_name = sheet_map.get(page_num, f"Page {page_num}")
 
-        # Skip non-plan pages (Cover, Legend, Site Plan, etc.)
-        if floor_name in ("Cover", "Legend", "Site Plan"):
+        # Skip non-plan pages ONLY when processing all pages (no explicit selection).
+        # If the user explicitly selected pages, process everything they chose.
+        if not pages and floor_name in ("Cover", "Legend", "Site Plan"):
             logger.info("Skipping %s (page %d)", floor_name, page_num)
             diagnostics["pages"][floor_name] = {"status": "skipped"}
             if progress_callback:
