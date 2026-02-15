@@ -11,7 +11,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse
 from pdf2image import convert_from_path
 from pydantic import BaseModel
@@ -168,10 +168,10 @@ async def preview_pdf(file: UploadFile):
 @router.post("/takeoff", response_model=JobResponse)
 async def start_takeoff(
     file: UploadFile | None = None,
-    preview_id: str | None = None,
-    pages: str | None = None,
-    sheet_map: str | None = None,
-    multipliers: str | None = None,
+    preview_id: str | None = Form(None),
+    pages: str | None = Form(None),
+    sheet_map: str | None = Form(None),
+    multipliers: str | None = Form(None),
 ):
     """Start a takeoff job.
 
