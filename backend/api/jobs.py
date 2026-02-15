@@ -43,6 +43,7 @@ class Job:
     sheet_map: dict[int, str] | None = None
     multipliers: dict[str, int] | None = None
     legend_page: int | None = None
+    legend_image_path: str | None = None
 
     def __post_init__(self):
         if not self.created_at:
@@ -60,6 +61,7 @@ def create_job(
     sheet_map: dict[int, str] | None = None,
     multipliers: dict[str, int] | None = None,
     legend_page: int | None = None,
+    legend_image_path: str | None = None,
 ) -> Job:
     """Create a new takeoff job and start processing in a background thread."""
     job_id = uuid.uuid4().hex[:12]
@@ -70,6 +72,7 @@ def create_job(
         sheet_map=sheet_map,
         multipliers=multipliers,
         legend_page=legend_page,
+        legend_image_path=legend_image_path,
     )
 
     with _lock:
@@ -110,6 +113,7 @@ def _process_job(job_id: str) -> None:
             sheet_map=job.sheet_map,
             multipliers=job.multipliers,
             legend_page=job.legend_page,
+            legend_image_path=job.legend_image_path,
             progress_callback=progress_callback,
         )
 
@@ -127,11 +131,16 @@ def _process_job(job_id: str) -> None:
             job.error = str(e)
 
     finally:
-        # Clean up the uploaded PDF
+        # Clean up the uploaded files
         try:
             Path(job.pdf_path).unlink(missing_ok=True)
         except Exception:
             pass
+        if job.legend_image_path:
+            try:
+                Path(job.legend_image_path).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def cleanup_old_jobs(max_age_hours: int = 24) -> int:

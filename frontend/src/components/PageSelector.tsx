@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { PagePreview } from "@/lib/api";
 
 interface PageSelectorProps {
   pages: PagePreview[];
-  onProcess: (selectedPages: number[] | null, legendPage: number | null) => void;
+  onProcess: (
+    selectedPages: number[] | null,
+    legendPage: number | null,
+    legendImage: File | null
+  ) => void;
   isProcessing: boolean;
 }
 
@@ -29,7 +33,9 @@ export default function PageSelector({
     return detected ? detected.page_number : null;
   });
 
-  const allSelected = selected.size === pages.length;
+  // Optional user-uploaded legend image (snapshot of the lighting table)
+  const [legendImage, setLegendImage] = useState<File | null>(null);
+  const legendInputRef = useRef<HTMLInputElement>(null);
 
   const togglePage = (pageNum: number) => {
     setSelected((prev) => {
@@ -53,6 +59,27 @@ export default function PageSelector({
         return next;
       });
     }
+    // Clear uploaded image when selecting a PDF page as legend
+    setLegendImage(null);
+  };
+
+  const handleLegendImageChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file (PNG, JPG, etc.).");
+      return;
+    }
+    setLegendImage(file);
+    // Clear PDF legend page selection — uploaded image takes priority
+    setLegendPageNum(null);
+  };
+
+  const removeLegendImage = () => {
+    setLegendImage(null);
+    if (legendInputRef.current) legendInputRef.current.value = "";
   };
 
   const selectAll = () => {
@@ -72,22 +99,24 @@ export default function PageSelector({
       selected.size === pages.length
         ? null
         : Array.from(selected).sort((a, b) => a - b);
-    onProcess(selectedPages, legendPageNum);
+    onProcess(selectedPages, legendPageNum, legendImage);
   };
+
+  const hasLegend = legendPageNum !== null || legendImage !== null;
 
   return (
     <div className="space-y-6">
       {/* Legend Selection Banner */}
       <div
         className={`rounded-xl p-4 flex items-start gap-3 ${
-          legendPageNum
+          hasLegend
             ? "bg-amber-950/30 border border-amber-900/50"
             : "bg-blue-950/30 border border-blue-900/50"
         }`}
       >
         <svg
           className={`w-5 h-5 mt-0.5 shrink-0 ${
-            legendPageNum ? "text-amber-400" : "text-blue-400"
+            hasLegend ? "text-amber-400" : "text-blue-400"
           }`}
           fill="none"
           viewBox="0 0 24 24"
@@ -100,15 +129,33 @@ export default function PageSelector({
             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <div>
-          {legendPageNum ? (
+        <div className="flex-1">
+          {legendImage ? (
+            <>
+              <p className="text-sm font-medium text-amber-300">
+                Legend Image Uploaded
+              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-xs text-amber-500">
+                  {legendImage.name} — fixture codes will be extracted from
+                  this image.
+                </p>
+                <button
+                  onClick={removeLegendImage}
+                  className="text-xs text-red-400 hover:text-red-300 underline shrink-0"
+                >
+                  Remove
+                </button>
+              </div>
+            </>
+          ) : legendPageNum ? (
             <>
               <p className="text-sm font-medium text-amber-300">
                 Symbol Legend — Page {legendPageNum}
               </p>
               <p className="text-xs text-amber-500 mt-0.5">
-                Fixture codes will be extracted from this page so the pipeline
-                knows what to look for. Right-click any thumbnail to change.
+                Fixture codes will be extracted from this page. Right-click any
+                thumbnail to change, or upload a snapshot below.
               </p>
             </>
           ) : (
@@ -118,9 +165,41 @@ export default function PageSelector({
               </p>
               <p className="text-xs text-blue-500 mt-0.5">
                 Right-click a page thumbnail to designate it as the symbol
-                legend. This tells the pipeline which fixture codes to look for.
+                legend, or upload a snapshot of the lighting fixture table.
               </p>
             </>
+          )}
+
+          {/* Upload legend image button */}
+          {!legendImage && (
+            <div className="mt-2.5">
+              <input
+                ref={legendInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleLegendImageChange}
+                className="hidden"
+              />
+              <button
+                onClick={() => legendInputRef.current?.click()}
+                className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-xs font-medium text-gray-300 transition-colors inline-flex items-center gap-1.5"
+              >
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                Upload Legend Snapshot
+              </button>
+            </div>
           )}
         </div>
       </div>

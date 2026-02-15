@@ -64,6 +64,7 @@ def run_takeoff(
     sheet_map: dict[int, str] | None = None,
     multipliers: dict[str, int] | None = None,
     legend_page: int | None = None,
+    legend_image_path: str | Path | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Run the full takeoff pipeline on a PDF.
@@ -76,6 +77,9 @@ def run_takeoff(
         legend_page: 1-based page number of the symbol legend sheet.
                      If provided, that page is OCR'd first to extract
                      project-specific fixture codes for fuzzy matching.
+        legend_image_path: path to a user-uploaded image (PNG/JPG) of the
+                          lighting fixture legend table. Takes priority over
+                          legend_page when both are provided.
         progress_callback: called with (current_page, total_pages, floor_name)
 
     Returns:
@@ -87,14 +91,32 @@ def run_takeoff(
     # Diagnostics: collect debug info about each pipeline stage
     diagnostics: dict[str, Any] = {
         "legend_page": legend_page,
+        "legend_image": bool(legend_image_path),
         "legend_codes": [],
         "used_default_codes": False,
         "pages": {},
     }
 
-    # --- Parse legend page for project-specific fixture codes ---
+    # --- Parse legend for project-specific fixture codes ---
     known_codes: list[str] | None = None
-    if legend_page:
+
+    # Priority 1: user-uploaded legend image (snapshot of the lighting table)
+    if legend_image_path:
+        logger.info("Parsing uploaded legend image for fixture codes...")
+        if progress_callback:
+            progress_callback(0, 0, "Reading legend image...")
+        legend_img = cv2.imread(str(legend_image_path))
+        if legend_img is not None:
+            known_codes = parse_legend_page(legend_img)
+            diagnostics["legend_codes"] = known_codes or []
+            diagnostics["legend_source"] = "uploaded_image"
+            logger.info("  Extracted %d fixture codes from legend image: %s",
+                        len(known_codes or []), known_codes)
+        if not known_codes:
+            logger.warning("  No codes found in legend image, trying legend page...")
+
+    # Priority 2: legend page from the PDF
+    if known_codes is None and legend_page:
         logger.info("Parsing legend page %d for fixture codes...", legend_page)
         if progress_callback:
             progress_callback(0, 0, "Reading symbol legend...")
@@ -102,6 +124,7 @@ def run_takeoff(
         if legend_images:
             known_codes = parse_legend_page(legend_images[0])
             diagnostics["legend_codes"] = known_codes or []
+            diagnostics["legend_source"] = "pdf_page"
             logger.info("  Extracted %d fixture codes from legend: %s", len(known_codes or []), known_codes)
         if not known_codes:
             logger.warning("  No codes found on legend page, falling back to defaults")
@@ -111,6 +134,7 @@ def run_takeoff(
     if known_codes is None:
         known_codes = KNOWN_LUMINAIRES
         diagnostics["used_default_codes"] = True
+        diagnostics["legend_source"] = "defaults"
 
     diagnostics["active_codes"] = known_codes
 

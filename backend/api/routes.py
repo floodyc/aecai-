@@ -168,6 +168,7 @@ async def preview_pdf(file: UploadFile):
 @router.post("/takeoff", response_model=JobResponse)
 async def start_takeoff(
     file: UploadFile | None = None,
+    legend_image: UploadFile | None = None,
     preview_id: str | None = Form(None),
     pages: str | None = Form(None),
     sheet_map: str | None = Form(None),
@@ -177,7 +178,8 @@ async def start_takeoff(
     """Start a takeoff job.
 
     Either upload a new PDF (file) or reference a previously previewed one
-    (preview_id). Poll GET /api/takeoff/{job_id} for status updates.
+    (preview_id). Optionally upload a legend_image (PNG/JPG snapshot of the
+    lighting fixture legend table). Poll GET /api/takeoff/{job_id} for status.
     """
     tmp_path: str | None = None
 
@@ -195,6 +197,18 @@ async def start_takeoff(
             tmp_path = tmp.name
     else:
         raise HTTPException(status_code=400, detail="Provide either a file or preview_id")
+
+    # Save legend image if uploaded
+    legend_image_path: str | None = None
+    if legend_image and legend_image.filename:
+        img_suffix = Path(legend_image.filename).suffix or ".png"
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=img_suffix, prefix="aecai_legend_"
+        ) as tmp:
+            img_content = await legend_image.read()
+            if len(img_content) > 0:
+                tmp.write(img_content)
+                legend_image_path = tmp.name
 
     # Parse optional JSON parameters from form fields
     parsed_pages = None
@@ -234,6 +248,7 @@ async def start_takeoff(
         sheet_map=parsed_sheet_map,
         multipliers=parsed_multipliers,
         legend_page=parsed_legend_page,
+        legend_image_path=legend_image_path,
     )
 
     return _job_to_response(job)

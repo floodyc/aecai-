@@ -72,7 +72,8 @@ export async function previewPdf(file: File): Promise<PreviewResponse> {
 export async function startTakeoff(
   previewId: string,
   pages?: number[],
-  legendPage?: number
+  legendPage?: number,
+  legendImage?: File
 ): Promise<JobResponse> {
   const formData = new FormData();
   formData.append("preview_id", previewId);
@@ -81,6 +82,9 @@ export async function startTakeoff(
   }
   if (legendPage) {
     formData.append("legend_page", String(legendPage));
+  }
+  if (legendImage) {
+    formData.append("legend_image", legendImage);
   }
 
   const res = await fetch(`${API_URL}/api/takeoff`, {

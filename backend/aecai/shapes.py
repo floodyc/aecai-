@@ -10,6 +10,8 @@ when no ovals are found, supporting a wider variety of drawing styles.
 
 from __future__ import annotations
 
+import logging
+
 import cv2
 import numpy as np
 
@@ -20,6 +22,12 @@ from .config import (
     OVAL_MIN_AREA,
     OVAL_MIN_ASPECT,
 )
+
+logger = logging.getLogger(__name__)
+
+# Maximum symbols to keep from the general detector.
+# Prevents the OCR stage from hanging on busy drawings.
+MAX_GENERAL_DETECTIONS = 300
 
 
 def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -150,6 +158,17 @@ def find_symbols(
 
     # De-duplicate overlapping detections: keep the smaller (inner) one
     symbols = _deduplicate(symbols)
+
+    # Cap to prevent OCR stage from hanging on very busy drawings
+    if len(symbols) > MAX_GENERAL_DETECTIONS:
+        logger.warning(
+            "  General detector found %d shapes, capping to %d. "
+            "Consider raising min_area or min_circularity.",
+            len(symbols), MAX_GENERAL_DETECTIONS,
+        )
+        # Keep detections with highest circularity (most likely to be symbols)
+        symbols.sort(key=lambda d: d["circularity"], reverse=True)
+        symbols = symbols[:MAX_GENERAL_DETECTIONS]
 
     return symbols
 

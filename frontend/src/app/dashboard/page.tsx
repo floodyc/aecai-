@@ -56,7 +56,8 @@ export default function DashboardPage() {
 
   const handleProcess = async (
     selectedPages: number[] | null,
-    legendPage: number | null
+    legendPage: number | null,
+    legendImage: File | null
   ) => {
     if (!preview) return;
     setIsProcessing(true);
@@ -66,7 +67,8 @@ export default function DashboardPage() {
       const job = await startTakeoff(
         preview.preview_id,
         selectedPages ?? undefined,
-        legendPage ?? undefined
+        legendPage ?? undefined,
+        legendImage ?? undefined
       );
       router.push(`/takeoff/${job.id}`);
     } catch (err) {
