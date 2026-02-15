@@ -210,22 +210,40 @@ async def start_takeoff(request: Request):
     else:
         raise HTTPException(status_code=400, detail="Provide either a file or preview_id")
 
-    # Save legend image if uploaded
+    # Save legend image — supports both file upload and base64 text field
     legend_image_path: str | None = None
-    if legend_image and hasattr(legend_image, "read"):
-        img_content = await legend_image.read()
-        _log.info("Legend image received: %d bytes, filename=%s",
-                  len(img_content), getattr(legend_image, "filename", "?"))
-        if img_content and len(img_content) > 0:
-            img_suffix = Path(getattr(legend_image, "filename", "legend.png") or "legend.png").suffix or ".png"
+
+    # Method 1: base64-encoded image (most reliable across all environments)
+    legend_image_b64 = form.get("legend_image_b64")
+    if legend_image_b64:
+        b64_str = str(legend_image_b64)
+        # Strip data URL prefix (e.g. "data:image/png;base64,...")
+        if "," in b64_str:
+            b64_str = b64_str.split(",", 1)[1]
+        img_data = base64.b64decode(b64_str)
+        _log.info("Legend image received via base64: %d bytes", len(img_data))
+        if len(img_data) > 0:
             with tempfile.NamedTemporaryFile(
-                delete=False, suffix=img_suffix, prefix="aecai_legend_"
+                delete=False, suffix=".png", prefix="aecai_legend_"
+            ) as tmp:
+                tmp.write(img_data)
+                legend_image_path = tmp.name
+            _log.info("Saved legend image to %s", legend_image_path)
+
+    # Method 2: multipart file upload (fallback)
+    if not legend_image_path and legend_image and hasattr(legend_image, "read"):
+        img_content = await legend_image.read()
+        _log.info("Legend image received via file upload: %d bytes", len(img_content))
+        if img_content and len(img_content) > 0:
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=".png", prefix="aecai_legend_"
             ) as tmp:
                 tmp.write(img_content)
                 legend_image_path = tmp.name
             _log.info("Saved legend image to %s", legend_image_path)
-    else:
-        _log.info("No legend image in form data (legend_image=%s)", legend_image)
+
+    if not legend_image_path:
+        _log.info("No legend image received")
 
     # Parse optional JSON parameters from form fields (cast to str first)
     pages_str = str(pages) if pages else None

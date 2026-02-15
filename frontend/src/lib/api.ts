@@ -89,7 +89,14 @@ export async function startTakeoff(
     formData.append("legend_page", String(legendPage));
   }
   if (legendImage) {
-    formData.append("legend_image", legendImage);
+    // Send as base64 text field to avoid multipart file parsing issues
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Failed to read legend image"));
+      reader.readAsDataURL(legendImage);
+    });
+    formData.append("legend_image_b64", base64);
   }
 
   const res = await fetch(`${API_URL}/api/takeoff`, {
