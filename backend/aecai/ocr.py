@@ -99,8 +99,18 @@ def fuzzy_correct(raw_text: str, known: list[str] | None = None, threshold: int 
     return None
 
 
-def recognize_fixtures(image: np.ndarray, ovals: list[dict]) -> list[dict]:
+def recognize_fixtures(
+    image: np.ndarray,
+    ovals: list[dict],
+    known: list[str] | None = None,
+) -> list[dict]:
     """OCR all detected ovals and return fixture identifications.
+
+    Args:
+        image: the page image (BGR or grayscale)
+        ovals: list of oval detection dicts from find_ovals()
+        known: optional project-specific luminaire codes for fuzzy matching.
+               If None, uses the default KNOWN_LUMINAIRES from config.
 
     Returns a list of dicts:
         oval     – original oval dict
@@ -114,7 +124,7 @@ def recognize_fixtures(image: np.ndarray, ovals: list[dict]) -> list[dict]:
             continue
 
         raw = ocr_crop(crop)
-        fixture = fuzzy_correct(raw)
+        fixture = fuzzy_correct(raw, known=known)
 
         results.append(
             {

@@ -42,6 +42,7 @@ class Job:
     pages: list[int] | None = None
     sheet_map: dict[int, str] | None = None
     multipliers: dict[str, int] | None = None
+    legend_page: int | None = None
 
     def __post_init__(self):
         if not self.created_at:
@@ -58,6 +59,7 @@ def create_job(
     pages: list[int] | None = None,
     sheet_map: dict[int, str] | None = None,
     multipliers: dict[str, int] | None = None,
+    legend_page: int | None = None,
 ) -> Job:
     """Create a new takeoff job and start processing in a background thread."""
     job_id = uuid.uuid4().hex[:12]
@@ -67,6 +69,7 @@ def create_job(
         pages=pages,
         sheet_map=sheet_map,
         multipliers=multipliers,
+        legend_page=legend_page,
     )
 
     with _lock:
@@ -106,6 +109,7 @@ def _process_job(job_id: str) -> None:
             pages=job.pages,
             sheet_map=job.sheet_map,
             multipliers=job.multipliers,
+            legend_page=job.legend_page,
             progress_callback=progress_callback,
         )
 

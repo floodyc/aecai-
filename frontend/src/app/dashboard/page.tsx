@@ -54,7 +54,10 @@ export default function DashboardPage() {
     }
   };
 
-  const handleProcess = async (selectedPages: number[] | null) => {
+  const handleProcess = async (
+    selectedPages: number[] | null,
+    legendPage: number | null
+  ) => {
     if (!preview) return;
     setIsProcessing(true);
     setError(null);
@@ -62,7 +65,8 @@ export default function DashboardPage() {
     try {
       const job = await startTakeoff(
         preview.preview_id,
-        selectedPages ?? undefined
+        selectedPages ?? undefined,
+        legendPage ?? undefined
       );
       router.push(`/takeoff/${job.id}`);
     } catch (err) {

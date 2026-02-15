@@ -172,6 +172,7 @@ async def start_takeoff(
     pages: str | None = Form(None),
     sheet_map: str | None = Form(None),
     multipliers: str | None = Form(None),
+    legend_page: str | None = Form(None),
 ):
     """Start a takeoff job.
 
@@ -220,11 +221,19 @@ async def start_takeoff(
         except (json.JSONDecodeError, ValueError):
             raise HTTPException(status_code=400, detail="Invalid multipliers JSON")
 
+    parsed_legend_page = None
+    if legend_page:
+        try:
+            parsed_legend_page = int(legend_page)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid legend_page value")
+
     job = create_job(
         pdf_path=tmp_path,
         pages=parsed_pages,
         sheet_map=parsed_sheet_map,
         multipliers=parsed_multipliers,
+        legend_page=parsed_legend_page,
     )
 
     return _job_to_response(job)

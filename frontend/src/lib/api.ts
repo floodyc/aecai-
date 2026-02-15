@@ -54,12 +54,16 @@ export async function previewPdf(file: File): Promise<PreviewResponse> {
 
 export async function startTakeoff(
   previewId: string,
-  pages?: number[]
+  pages?: number[],
+  legendPage?: number
 ): Promise<JobResponse> {
   const formData = new FormData();
   formData.append("preview_id", previewId);
   if (pages && pages.length > 0) {
     formData.append("pages", JSON.stringify(pages));
+  }
+  if (legendPage) {
+    formData.append("legend_page", String(legendPage));
   }
 
   const res = await fetch(`${API_URL}/api/takeoff`, {
