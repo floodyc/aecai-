@@ -211,11 +211,11 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                 </p>
                 {diagnostics.legend_source === "uploaded_image" ? (
                   <p className="text-gray-300">
-                    Uploaded legend image — learned{" "}
+                    Uploaded legend image — extracted{" "}
                     <span className="font-semibold text-primary-400">
-                      {diagnostics.templates_extracted ?? diagnostics.legend_codes.length}
+                      {diagnostics.legend_codes.length}
                     </span>{" "}
-                    symbol templates
+                    fixture codes
                     {diagnostics.legend_codes.length > 0 && (
                       <span className="text-gray-500">
                         {" "}
@@ -287,43 +287,8 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                             <span className="text-xs text-gray-500">
                               Skipped
                             </span>
-                          ) : info.detection_method === "template_match" ? (
-                            <span className="text-xs text-gray-400">
-                              <span className="text-gray-600 mr-1.5">
-                                [template match]
-                              </span>
-                              <span
-                                className={
-                                  (info.template_matches ?? 0) === 0
-                                    ? "text-amber-400"
-                                    : "text-green-400"
-                                }
-                              >
-                                {info.template_matches ?? 0} symbols found
-                              </span>
-                            </span>
-                          ) : info.detection_method === "text_search" ? (
-                            <span className="text-xs text-gray-400">
-                              <span className="text-gray-600 mr-1.5">
-                                [text search]
-                              </span>
-                              <span
-                                className={
-                                  (info.text_matches ?? 0) === 0
-                                    ? "text-amber-400"
-                                    : "text-green-400"
-                                }
-                              >
-                                {info.text_matches ?? 0} codes found
-                              </span>
-                            </span>
                           ) : (
                             <span className="text-xs text-gray-400">
-                              {info.detection_method && (
-                                <span className="text-gray-600 mr-1.5">
-                                  [{info.detection_method}]
-                                </span>
-                              )}
                               <span
                                 className={
                                   info.shapes_found === 0
@@ -331,7 +296,7 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                                     : "text-primary-400"
                                 }
                               >
-                                {info.shapes_found} shapes
+                                {info.shapes_found} ovals
                               </span>
                               {" → "}
                               <span
@@ -341,7 +306,7 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                                     : "text-green-400"
                                 }
                               >
-                                {info.shapes_matched} matched
+                                {info.shapes_matched} with text
                               </span>
                             </span>
                           )}
@@ -350,9 +315,7 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                           info.raw_ocr_samples.length > 0 && (
                             <div className="mt-1.5">
                               <span className="text-[10px] text-gray-500 uppercase">
-                                {info.detection_method === "template_match"
-                                  ? "Match samples: "
-                                  : "Raw OCR samples: "}
+                                Raw OCR samples:{" "}
                               </span>
                               <span className="text-xs text-gray-400 font-mono">
                                 {info.raw_ocr_samples
@@ -362,20 +325,17 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                             </div>
                           )}
                         {info.status !== "skipped" &&
-                          info.detection_method === "text_search" &&
-                          (info.text_matches ?? 0) === 0 && (
-                            <p className="text-xs text-amber-400 mt-1">
-                              No fixture codes found on this page. Check that
-                              the legend image contains the correct codes.
+                          (info.shapes_found ?? 0) === 0 && (
+                            <p className="text-xs text-red-400 mt-1">
+                              No ovals detected on this page.
                             </p>
                           )}
                         {info.status !== "skipped" &&
-                          info.detection_method === "ovals" &&
                           (info.shapes_found ?? 0) > 0 &&
                           info.shapes_matched === 0 && (
                             <p className="text-xs text-amber-400 mt-1">
-                              Shapes found but no OCR text matched the legend
-                              codes. Check that the correct legend is selected.
+                              Ovals found but no text could be read inside
+                              them. The ovals may be too small or noisy.
                             </p>
                           )}
                       </div>

@@ -109,6 +109,10 @@ def recognize_fixtures(
 ) -> list[dict]:
     """OCR all detected ovals and return fixture identifications.
 
+    Every oval with readable text is counted. Fuzzy matching against known
+    codes is used for correction (e.g. "LTO4" → "LT04"), but ovals that
+    don't match any known code are still kept under their raw OCR text.
+
     Args:
         image: the page image (BGR or grayscale)
         ovals: list of oval detection dicts from find_ovals()
@@ -118,7 +122,7 @@ def recognize_fixtures(
     Returns a list of dicts:
         oval     – original oval dict
         raw_text – Tesseract output before correction
-        fixture  – corrected luminaire code (or None)
+        fixture  – corrected code if matched, or cleaned raw text, or None if empty
     """
     results = []
     for oval in ovals:
@@ -127,7 +131,15 @@ def recognize_fixtures(
             continue
 
         raw = ocr_crop(crop)
+
+        # Try fuzzy correction against known codes
         fixture = fuzzy_correct(raw, known=known)
+
+        # If no fuzzy match but there IS text, keep the cleaned raw text
+        if fixture is None and raw:
+            cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+            if len(cleaned) >= 2:
+                fixture = cleaned
 
         results.append(
             {
