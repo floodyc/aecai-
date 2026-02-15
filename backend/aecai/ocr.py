@@ -77,13 +77,25 @@ def preprocess_for_ocr(crop: np.ndarray) -> np.ndarray:
 
 
 def ocr_crop(crop: np.ndarray) -> str:
-    """Run Tesseract on a preprocessed crop and return raw text."""
+    """Run Tesseract on a preprocessed crop and return raw text.
+
+    Tries PSM 7 (single text line) first, falls back to PSM 8 (single word).
+    PSM 7 handles codes like "LT04A" better since it expects a full line
+    rather than a single word/character.
+    """
     processed = preprocess_for_ocr(crop)
-    text = pytesseract.image_to_string(
-        processed,
-        config="--psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-    )
-    return text.strip()
+    whitelist = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+    # Try PSM 7 (single text line) — better for multi-character codes
+    text = pytesseract.image_to_string(processed, config=f"--psm 7 {whitelist}").strip()
+
+    # If result is too short, try PSM 8 (single word) as fallback
+    if len(text) < 3:
+        text2 = pytesseract.image_to_string(processed, config=f"--psm 8 {whitelist}").strip()
+        if len(text2) > len(text):
+            text = text2
+
+    return text
 
 
 def fuzzy_correct(raw_text: str, known: list[str] | None = None, threshold: int = FUZZY_THRESHOLD) -> str | None:

@@ -39,7 +39,7 @@ OVAL_MIN_AREA = 600
 OVAL_MAX_AREA = 12000
 OVAL_MIN_ASPECT = 0.3
 OVAL_MAX_ASPECT = 3.5
-OVAL_CIRCULARITY_THRESH = 0.55
+OVAL_CIRCULARITY_THRESH = 0.4
 
 # ---------------------------------------------------------------------------
 # OCR crop settings

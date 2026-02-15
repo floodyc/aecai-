@@ -25,7 +25,14 @@ logger = logging.getLogger(__name__)
 
 
 def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Convert to grayscale and produce a binary image for contour detection."""
+    """Convert to grayscale and produce a binary image for contour detection.
+
+    Uses a two-stage morphological close:
+    1. Small kernel (3x3) to close tiny gaps in line work
+    2. Larger kernel (7x7) to merge text glyphs INTO the oval boundary,
+       turning a text-filled oval into a single solid blob whose contour
+       is roughly elliptical.
+    """
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
@@ -35,8 +42,14 @@ def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 8
     )
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+    # Stage 1: close tiny gaps in contour lines
+    k_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_small, iterations=2)
+
+    # Stage 2: merge text inside ovals into a solid blob
+    # 7x7 ellipse bridges gaps between characters and the oval wall
+    k_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_large, iterations=1)
 
     return gray, binary
 
