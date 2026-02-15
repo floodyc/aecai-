@@ -188,9 +188,10 @@ async def start_takeoff(request: Request):
     legend_page = form.get("legend_page")
     file = form.get("file")
     legend_image = form.get("legend_image")
+    fixture_prefix = form.get("fixture_prefix")
 
-    _log.info("Takeoff request: preview_id=%s, legend_image=%s (type=%s)",
-              preview_id, legend_image, type(legend_image).__name__)
+    _log.info("Takeoff request: preview_id=%s, fixture_prefix=%s, legend_image=%s (type=%s)",
+              preview_id, fixture_prefix, legend_image, type(legend_image).__name__)
 
     tmp_path: str | None = None
 
@@ -282,6 +283,10 @@ async def start_takeoff(request: Request):
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid legend_page value")
 
+    parsed_fixture_prefix = str(fixture_prefix).strip().upper() if fixture_prefix else None
+    if parsed_fixture_prefix == "":
+        parsed_fixture_prefix = None
+
     job = create_job(
         pdf_path=tmp_path,
         pages=parsed_pages,
@@ -289,6 +294,7 @@ async def start_takeoff(request: Request):
         multipliers=parsed_multipliers,
         legend_page=parsed_legend_page,
         legend_image_path=legend_image_path,
+        fixture_prefix=parsed_fixture_prefix,
     )
 
     return _job_to_response(job)

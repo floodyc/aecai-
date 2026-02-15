@@ -29,6 +29,7 @@ export interface Diagnostics {
   legend_codes: string[];
   used_default_codes: boolean;
   active_codes: string[];
+  fixture_prefix?: string | null;
   templates_extracted?: number;
   pages: Record<string, PageDiagnostics>;
 }
@@ -78,7 +79,8 @@ export async function startTakeoff(
   previewId: string,
   pages?: number[],
   legendPage?: number,
-  legendImage?: File
+  legendImage?: File,
+  fixturePrefix?: string
 ): Promise<JobResponse> {
   const formData = new FormData();
   formData.append("preview_id", previewId);
@@ -87,6 +89,9 @@ export async function startTakeoff(
   }
   if (legendPage) {
     formData.append("legend_page", String(legendPage));
+  }
+  if (fixturePrefix) {
+    formData.append("fixture_prefix", fixturePrefix);
   }
   if (legendImage) {
     // Send as base64 text field to avoid multipart file parsing issues

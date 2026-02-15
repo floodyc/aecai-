@@ -221,27 +221,25 @@ def recognize_fixtures(
     image: np.ndarray,
     ovals: list[dict],
     known: list[str] | None = None,
+    prefix: str | None = None,
 ) -> list[dict]:
     """OCR all detected ovals and return fixture identifications.
 
-    For each oval:
-    1. Centre-crop inward (remove oval border)
-    2. Preprocess (3x upscale, Otsu, white border)
-    3. Tesseract PSM-8 (single word)
-    4. Prefix/suffix normalization
-    5. Fuzzy match against known codes
-    6. False-positive filter
+    Two modes:
+    - **Prefix mode** (when prefix is set): accept any oval text starting
+      with the user-supplied prefix (e.g. "LT" matches "LT04", "LT12A").
+    - **Fuzzy mode** (default): fuzzy-match against known code list.
 
     Args:
         image: the page image (BGR or grayscale)
         ovals: list of oval detection dicts from find_ovals()
         known: optional project-specific luminaire codes for fuzzy matching.
-               If None, uses the default KNOWN_LUMINAIRES from config.
+        prefix: if set, match ovals whose OCR text starts with this string.
 
     Returns a list of dicts:
         oval     – original oval dict
         raw_text – Tesseract output before correction
-        fixture  – corrected code, or None if not a fixture
+        fixture  – matched code, or None if not a fixture
     """
     results = []
     for oval in ovals:
@@ -256,19 +254,26 @@ def recognize_fixtures(
             results.append({"oval": oval, "raw_text": raw, "fixture": None})
             continue
 
-        # Try fuzzy correction against known codes
-        fixture = fuzzy_correct(raw, known=known)
+        cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
 
-        # If no fuzzy match, use cleaned text if it looks like a code
-        # (has both letters and digits — e.g. LT04, not just "42")
-        if fixture is None and raw:
-            cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
-            cleaned = _normalize_prefix(cleaned)
-            cleaned = _normalize_suffix(cleaned)
-            has_letter = any(c.isalpha() for c in cleaned)
-            has_digit = any(c.isdigit() for c in cleaned)
-            if has_letter and has_digit and len(cleaned) >= 3:
+        fixture = None
+
+        if prefix:
+            # Prefix mode: accept text starting with the prefix
+            if cleaned.startswith(prefix.upper()):
                 fixture = cleaned
+        else:
+            # Fuzzy mode: match against known codes
+            fixture = fuzzy_correct(raw, known=known)
+
+            # Fallback: use cleaned text if it looks like a code
+            if fixture is None and cleaned:
+                cleaned = _normalize_prefix(cleaned)
+                cleaned = _normalize_suffix(cleaned)
+                has_letter = any(c.isalpha() for c in cleaned)
+                has_digit = any(c.isdigit() for c in cleaned)
+                if has_letter and has_digit and len(cleaned) >= 3:
+                    fixture = cleaned
 
         results.append(
             {

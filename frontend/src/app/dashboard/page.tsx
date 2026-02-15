@@ -57,7 +57,8 @@ export default function DashboardPage() {
   const handleProcess = async (
     selectedPages: number[] | null,
     legendPage: number | null,
-    legendImage: File | null
+    legendImage: File | null,
+    fixturePrefix: string | null
   ) => {
     if (!preview) return;
     setIsProcessing(true);
@@ -68,7 +69,8 @@ export default function DashboardPage() {
         preview.preview_id,
         selectedPages ?? undefined,
         legendPage ?? undefined,
-        legendImage ?? undefined
+        legendImage ?? undefined,
+        fixturePrefix ?? undefined
       );
       router.push(`/takeoff/${job.id}`);
     } catch (err) {

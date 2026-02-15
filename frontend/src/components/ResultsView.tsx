@@ -47,7 +47,6 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
       ]);
     }
 
-    // Building totals row
     rows.push([
       "Building Total",
       ...types.map((t) => String(building_totals[t] || 0)),
@@ -94,81 +93,75 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
         </div>
       </div>
 
-      {/* Fixture Table */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-800">
-          <h3 className="font-semibold text-gray-100">
-            Fixture Count by Floor
-          </h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-800 bg-gray-950/50">
-                <th className="text-left px-4 py-3 font-medium text-gray-400 sticky left-0 bg-gray-950/50">
-                  Floor
-                </th>
-                {types.map((t) => (
-                  <th
-                    key={t}
-                    className="text-right px-4 py-3 font-medium text-gray-400 whitespace-nowrap"
-                  >
-                    {t}
-                  </th>
-                ))}
-                <th className="text-right px-4 py-3 font-medium text-primary-400">
-                  Total
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {floorNames.map((floor) => {
-                const counts = floors[floor];
-                const rowTotal = Object.values(counts).reduce(
-                  (a, b) => a + b,
-                  0
-                );
-                return (
-                  <tr
-                    key={floor}
-                    className="border-b border-gray-800/50 hover:bg-gray-800/30"
-                  >
-                    <td className="px-4 py-2.5 text-gray-200 font-medium sticky left-0 bg-gray-900">
-                      {floor}
-                    </td>
-                    {types.map((t) => (
-                      <td
+      {/* Per-Floor Fixture Cards */}
+      <div className="space-y-4">
+        <h3 className="font-semibold text-gray-100">Fixture Count by Floor</h3>
+
+        {floorNames.map((floor) => {
+          const counts = floors[floor];
+          const rowTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+          return (
+            <div
+              key={floor}
+              className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden"
+            >
+              <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                <span className="font-medium text-gray-200">{floor}</span>
+                <span className="text-sm font-semibold text-primary-400 tabular-nums">
+                  {rowTotal} fixtures
+                </span>
+              </div>
+              <div className="px-5 py-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-2">
+                  {types.map((t) => {
+                    const count = counts[t] || 0;
+                    if (count === 0) return null;
+                    return (
+                      <div
                         key={t}
-                        className="text-right px-4 py-2.5 text-gray-300 tabular-nums"
+                        className="flex items-center justify-between"
                       >
-                        {counts[t] || "—"}
-                      </td>
-                    ))}
-                    <td className="text-right px-4 py-2.5 font-semibold text-gray-100 tabular-nums">
-                      {rowTotal}
-                    </td>
-                  </tr>
+                        <span className="text-sm text-gray-400 font-mono">
+                          {t}
+                        </span>
+                        <span className="text-sm font-semibold text-gray-100 tabular-nums ml-3">
+                          {count}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Building Total Card */}
+        <div className="bg-primary-950/30 border-2 border-primary-800 rounded-xl overflow-hidden">
+          <div className="px-5 py-3 border-b border-primary-800 flex items-center justify-between">
+            <span className="font-bold text-primary-300">Building Total</span>
+            <span className="text-sm font-bold text-primary-200 tabular-nums">
+              {summary.total_fixtures.toLocaleString()} fixtures
+            </span>
+          </div>
+          <div className="px-5 py-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-2">
+              {types.map((t) => {
+                const count = building_totals[t] || 0;
+                if (count === 0) return null;
+                return (
+                  <div key={t} className="flex items-center justify-between">
+                    <span className="text-sm text-primary-400 font-mono">
+                      {t}
+                    </span>
+                    <span className="text-sm font-bold text-primary-200 tabular-nums ml-3">
+                      {count}
+                    </span>
+                  </div>
                 );
               })}
-              {/* Building Totals Row */}
-              <tr className="bg-primary-950/30 border-t-2 border-primary-800">
-                <td className="px-4 py-3 font-bold text-primary-300 sticky left-0 bg-primary-950/30">
-                  Building Total
-                </td>
-                {types.map((t) => (
-                  <td
-                    key={t}
-                    className="text-right px-4 py-3 font-bold text-primary-300 tabular-nums"
-                  >
-                    {building_totals[t] || "—"}
-                  </td>
-                ))}
-                <td className="text-right px-4 py-3 font-bold text-primary-200 tabular-nums">
-                  {summary.total_fixtures.toLocaleString()}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -204,12 +197,20 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
 
           {showDiag && (
             <div className="px-5 py-4 space-y-4 text-sm">
-              {/* Legend info */}
+              {/* Legend / prefix info */}
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                  Symbol Legend
+                  Detection Method
                 </p>
-                {diagnostics.legend_source === "uploaded_image" ? (
+                {diagnostics.fixture_prefix ? (
+                  <p className="text-gray-300">
+                    Prefix match:{" "}
+                    <span className="font-mono font-semibold text-primary-400">
+                      {diagnostics.fixture_prefix}*
+                    </span>{" "}
+                    — matching any oval text starting with &quot;{diagnostics.fixture_prefix}&quot;
+                  </p>
+                ) : diagnostics.legend_source === "uploaded_image" ? (
                   <p className="text-gray-300">
                     Uploaded legend image — extracted{" "}
                     <span className="font-semibold text-primary-400">
@@ -245,27 +246,29 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                   </p>
                 ) : (
                   <p className="text-amber-400">
-                    No legend provided — used default codes (LT01–LT20)
+                    No legend provided — used default codes
                   </p>
                 )}
               </div>
 
-              {/* Active codes */}
-              <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                  Active Fixture Codes ({diagnostics.active_codes.length})
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {diagnostics.active_codes.map((code) => (
-                    <span
-                      key={code}
-                      className="px-2 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 font-mono"
-                    >
-                      {code}
-                    </span>
-                  ))}
+              {/* Active codes (hide when using prefix mode) */}
+              {!diagnostics.fixture_prefix && (
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                    Active Fixture Codes ({diagnostics.active_codes.length})
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {diagnostics.active_codes.map((code) => (
+                      <span
+                        key={code}
+                        className="px-2 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 font-mono"
+                      >
+                        {code}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Per-page breakdown */}
               <div>
@@ -306,7 +309,7 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                                     : "text-green-400"
                                 }
                               >
-                                {info.shapes_matched} with text
+                                {info.shapes_matched} matched
                               </span>
                             </span>
                           )}
@@ -334,8 +337,7 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                           (info.shapes_found ?? 0) > 0 &&
                           info.shapes_matched === 0 && (
                             <p className="text-xs text-amber-400 mt-1">
-                              Ovals found but no text could be read inside
-                              them. The ovals may be too small or noisy.
+                              Ovals found but no text matched the prefix/codes.
                             </p>
                           )}
                       </div>
