@@ -1,11 +1,8 @@
-"""OCR module – two detection strategies for fixture codes on floor plans.
+"""OCR module – reads fixture codes from detected ovals on floor plans.
 
-Strategy 1 (shape-based): crops each detected oval, runs Tesseract PSM 8,
-fuzzy-matches against known codes. Works for drawings with oval symbols.
-
-Strategy 2 (text-search): full-page OCR with word bounding boxes, then
-filters words that match known fixture codes. Works for any drawing style.
-The legend drives what codes to keep.
+Strategy: crop each detected oval INWARD (15% horiz / 20% vert) to remove
+the drawn oval border, upscale 3x, Tesseract PSM-8 (single word), then
+fuzzy-correct against known codes with prefix normalization and suffix fixes.
 """
 
 from __future__ import annotations
@@ -18,50 +15,68 @@ import numpy as np
 import pytesseract
 from thefuzz import fuzz
 
-from .config import CROP_PADDING, FUZZY_THRESHOLD, KNOWN_LUMINAIRES, TESSERACT_CMD
+from .config import (
+    CROP_MARGIN_H,
+    CROP_MARGIN_V,
+    FUZZY_THRESHOLD,
+    KNOWN_LUMINAIRES,
+    TESSERACT_CMD,
+)
 
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 logger = logging.getLogger(__name__)
 
 
-def crop_oval(image: np.ndarray, oval: dict, padding: int = CROP_PADDING) -> np.ndarray:
-    """Crop around an oval detection.
+# ---------------------------------------------------------------------------
+# Cropping
+# ---------------------------------------------------------------------------
 
-    padding > 0 shrinks inward, padding < 0 expands outward.
-    Negative padding ensures the full text (e.g. "LT04") is captured
-    even when letters are close to the oval boundary.
+def crop_oval(image: np.ndarray, oval: dict) -> np.ndarray:
+    """Centre-crop an oval detection INWARD to remove the oval border.
+
+    Margins are percentages of the oval's width/height:
+      - 15% horizontal → removes left/right oval line
+      - 20% vertical   → removes top/bottom oval line
+
+    This ensures Tesseract sees only the text (e.g. "LT04"), not the
+    surrounding drawn oval which confuses OCR.
     """
     h_img, w_img = image.shape[:2]
-    x = max(oval["x"] + padding, 0)
-    y = max(oval["y"] + padding, 0)
-    x2 = min(oval["x"] + oval["w"] - padding, w_img)
-    y2 = min(oval["y"] + oval["h"] - padding, h_img)
+    ox, oy, ow, oh = oval["x"], oval["y"], oval["w"], oval["h"]
 
-    if x2 <= x or y2 <= y:
-        x, y = oval["x"], oval["y"]
-        x2, y2 = x + oval["w"], y + oval["h"]
+    margin_x = int(ow * CROP_MARGIN_H)
+    margin_y = int(oh * CROP_MARGIN_V)
 
-    return image[y:y2, x:x2]
+    x1 = max(ox + margin_x, 0)
+    y1 = max(oy + margin_y, 0)
+    x2 = min(ox + ow - margin_x, w_img)
+    y2 = min(oy + oh - margin_y, h_img)
 
+    # If margins ate the whole crop, fall back to full bbox
+    if x2 <= x1 or y2 <= y1:
+        x1, y1 = ox, oy
+        x2, y2 = ox + ow, oy + oh
+
+    return image[y1:y2, x1:x2]
+
+
+# ---------------------------------------------------------------------------
+# Preprocessing
+# ---------------------------------------------------------------------------
 
 def preprocess_for_ocr(crop: np.ndarray) -> np.ndarray:
     """Resize and threshold a crop for better Tesseract accuracy.
 
-    Scales small crops up to at least 120px on the longest side so
-    Tesseract can read small fixture codes like "LT04A".  Adds a white
-    border so characters at the edges aren't clipped.
+    Upscales 3x (matches the working version's approach), then Otsu
+    binarises.  Adds a white border so edge characters aren't clipped.
     """
     if len(crop.shape) == 3:
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     else:
         gray = crop
 
-    # Scale up so the longest side is at least 120px
-    h, w = gray.shape
-    target = 120
-    if max(h, w) < target:
-        scale = target / max(h, w)
-        gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    # 3x upscale — small fixture-code crops need magnification
+    gray = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
 
     # Otsu binarisation
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -76,31 +91,66 @@ def preprocess_for_ocr(crop: np.ndarray) -> np.ndarray:
     return binary
 
 
-def ocr_crop(crop: np.ndarray) -> str:
-    """Run Tesseract on a preprocessed crop and return raw text.
+# ---------------------------------------------------------------------------
+# Tesseract OCR
+# ---------------------------------------------------------------------------
 
-    Tries PSM 7 (single text line) first, falls back to PSM 8 (single word).
-    PSM 7 handles codes like "LT04A" better since it expects a full line
-    rather than a single word/character.
+def ocr_crop(crop: np.ndarray) -> str:
+    """Run Tesseract PSM-8 (single word) on a preprocessed crop.
+
+    PSM-8 is the right mode for short fixture codes like "LT04A".
+    Whitelist restricts to A-Z 0-9.
     """
     processed = preprocess_for_ocr(crop)
     whitelist = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-    # Try PSM 7 (single text line) — better for multi-character codes
-    text = pytesseract.image_to_string(processed, config=f"--psm 7 {whitelist}").strip()
+    text = pytesseract.image_to_string(processed, config=f"--psm 8 {whitelist}").strip()
+    return text
 
-    # If result is too short, try PSM 8 (single word) as fallback
-    if len(text) < 3:
-        text2 = pytesseract.image_to_string(processed, config=f"--psm 8 {whitelist}").strip()
-        if len(text2) > len(text):
-            text = text2
 
+# ---------------------------------------------------------------------------
+# OCR correction
+# ---------------------------------------------------------------------------
+
+# Common OCR misreads for the "LT" prefix
+_PREFIX_FIXES = {
+    "LTO": "LT0",   # O misread as zero
+    "L7":  "LT",     # T misread as 7
+    "IT":  "LT",     # L misread as I
+    "1T":  "LT",     # L misread as 1
+    "L1":  "LT",     # T misread as 1 (when followed by digits)
+}
+
+# Common OCR suffix misreads
+_SUFFIX_FIXES = {
+    "8": "B",   # B misread as 8 (LT048 → LT04B)
+}
+
+
+def _normalize_prefix(text: str) -> str:
+    """Fix common OCR misreads of the LT prefix."""
+    upper = text.upper()
+    for bad, good in _PREFIX_FIXES.items():
+        if upper.startswith(bad):
+            upper = good + upper[len(bad):]
+            break
+    return upper
+
+
+def _normalize_suffix(text: str) -> str:
+    """Fix trailing character misreads (e.g. 8 → B)."""
+    if len(text) >= 3 and text[-1] in _SUFFIX_FIXES:
+        # Only fix if the rest looks like a fixture code (has digits before the suffix)
+        body = text[:-1]
+        if any(c.isdigit() for c in body):
+            text = body + _SUFFIX_FIXES[text[-1]]
     return text
 
 
 def fuzzy_correct(raw_text: str, known: list[str] | None = None, threshold: int = FUZZY_THRESHOLD) -> str | None:
     """Fuzzy-match OCR text against known luminaire codes.
 
+    Applies prefix/suffix normalization before matching.
     Returns the best match if the score is above threshold, else None.
     """
     if not raw_text:
@@ -108,11 +158,20 @@ def fuzzy_correct(raw_text: str, known: list[str] | None = None, threshold: int 
 
     known = known or KNOWN_LUMINAIRES
 
-    # Quick cleanup: strip non-alphanumeric, uppercase
+    # Clean: strip non-alphanumeric, uppercase
     cleaned = re.sub(r"[^A-Za-z0-9]", "", raw_text).upper()
     if not cleaned:
         return None
 
+    # Apply OCR error corrections
+    cleaned = _normalize_prefix(cleaned)
+    cleaned = _normalize_suffix(cleaned)
+
+    # If cleaned text exactly matches a known code, return immediately
+    if cleaned in known:
+        return cleaned
+
+    # Fuzzy match
     best_match = None
     best_score = 0
 
@@ -127,6 +186,37 @@ def fuzzy_correct(raw_text: str, known: list[str] | None = None, threshold: int 
     return None
 
 
+# ---------------------------------------------------------------------------
+# False-positive filter
+# ---------------------------------------------------------------------------
+
+def _is_false_positive(text: str) -> bool:
+    """Filter out OCR results that are clearly not fixture codes.
+
+    Common false positives:
+    - Single characters (noise)
+    - Pure whitespace
+    - Common drawing annotations (N, S, E, W, UP, DN, etc.)
+    """
+    if not text or len(text) < 2:
+        return True
+
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", text).upper()
+    if len(cleaned) < 2:
+        return True
+
+    # Common non-fixture annotations found inside oval-like shapes
+    _noise_words = {"UP", "DN", "EX", "NIC", "TYP", "SIM", "REF", "NTS", "EQ"}
+    if cleaned in _noise_words:
+        return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Main recognition
+# ---------------------------------------------------------------------------
+
 def recognize_fixtures(
     image: np.ndarray,
     ovals: list[dict],
@@ -134,10 +224,13 @@ def recognize_fixtures(
 ) -> list[dict]:
     """OCR all detected ovals and return fixture identifications.
 
-    Any oval with readable text is counted as a fixture. The text inside
-    can be numbers only (e.g. "30"), letters+numbers (e.g. "LT04"), or
-    any alphanumeric code. Fuzzy matching against known codes is used
-    for OCR correction when available.
+    For each oval:
+    1. Centre-crop inward (remove oval border)
+    2. Preprocess (3x upscale, Otsu, white border)
+    3. Tesseract PSM-8 (single word)
+    4. Prefix/suffix normalization
+    5. Fuzzy match against known codes
+    6. False-positive filter
 
     Args:
         image: the page image (BGR or grayscale)
@@ -148,7 +241,7 @@ def recognize_fixtures(
     Returns a list of dicts:
         oval     – original oval dict
         raw_text – Tesseract output before correction
-        fixture  – corrected/cleaned code, or None if oval had no text
+        fixture  – corrected code, or None if not a fixture
     """
     results = []
     for oval in ovals:
@@ -158,14 +251,23 @@ def recognize_fixtures(
 
         raw = ocr_crop(crop)
 
+        # Filter obvious noise
+        if _is_false_positive(raw):
+            results.append({"oval": oval, "raw_text": raw, "fixture": None})
+            continue
+
         # Try fuzzy correction against known codes
         fixture = fuzzy_correct(raw, known=known)
 
-        # If no fuzzy match, use the cleaned raw text directly
-        # Accept any alphanumeric text (numbers like "30" or codes like "LT04")
+        # If no fuzzy match, use cleaned text if it looks like a code
+        # (has both letters and digits — e.g. LT04, not just "42")
         if fixture is None and raw:
             cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
-            if cleaned:
+            cleaned = _normalize_prefix(cleaned)
+            cleaned = _normalize_suffix(cleaned)
+            has_letter = any(c.isalpha() for c in cleaned)
+            has_digit = any(c.isdigit() for c in cleaned)
+            if has_letter and has_digit and len(cleaned) >= 3:
                 fixture = cleaned
 
         results.append(

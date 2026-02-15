@@ -35,17 +35,22 @@ DPI = int(os.environ.get("AECAI_DPI", "300"))
 # Oval detection parameters (calibrated – do not change)
 # ---------------------------------------------------------------------------
 
-OVAL_MIN_AREA = 600
-OVAL_MAX_AREA = 12000
-OVAL_MIN_ASPECT = 0.3
+OVAL_MIN_AREA = 400
+OVAL_MAX_AREA = 8000
+OVAL_MIN_ASPECT = 1.2
 OVAL_MAX_ASPECT = 3.5
-OVAL_CIRCULARITY_THRESH = 0.4
+OVAL_ELLIPSE_FIT_MIN = 0.6
+OVAL_ELLIPSE_FIT_MAX = 1.4
 
 # ---------------------------------------------------------------------------
 # OCR crop settings
 # ---------------------------------------------------------------------------
 
-CROP_PADDING = -4  # negative = expand crop beyond oval boundary to capture full text
+# Center-crop margins (fraction of oval size) — crops INWARD to remove
+# the drawn oval border before OCR.  Asymmetric because ovals are wider
+# than tall and the code text is centred.
+CROP_MARGIN_H = 0.15  # 15% horizontal margin
+CROP_MARGIN_V = 0.20  # 20% vertical margin
 
 # ---------------------------------------------------------------------------
 # Fuzzy correction dictionary (tuned against real drawings)
@@ -65,6 +70,9 @@ KNOWN_LUMINAIRES = [
     "LT11", "LT11A",
     "LT12", "LT12A",
     "LT13", "LT14", "LT15", "LT16", "LT17", "LT18", "LT19", "LT20",
+    "LT21", "LT22", "LT23", "LT24", "LT25",
+    "LT30", "LT31", "LT32", "LT33", "LT34", "LT35",
+    "LT40", "LT41", "LT42", "LT43", "LT44", "LT45", "LT46", "LT47", "LT48",
 ]
 
 FUZZY_THRESHOLD = 75  # minimum fuzz ratio to accept a correction
