@@ -84,6 +84,14 @@ def run_takeoff(
     sheet_map = sheet_map or DEFAULT_SHEET_MAP
     multipliers = multipliers if multipliers is not None else DEFAULT_TYPICAL_MULTIPLIERS
 
+    # Diagnostics: collect debug info about each pipeline stage
+    diagnostics: dict[str, Any] = {
+        "legend_page": legend_page,
+        "legend_codes": [],
+        "used_default_codes": False,
+        "pages": {},
+    }
+
     # --- Parse legend page for project-specific fixture codes ---
     known_codes: list[str] | None = None
     if legend_page:
@@ -93,7 +101,8 @@ def run_takeoff(
         legend_images = pdf_to_images(pdf_path, pages=[legend_page])
         if legend_images:
             known_codes = parse_legend_page(legend_images[0])
-            logger.info("  Extracted %d fixture codes from legend: %s", len(known_codes), known_codes)
+            diagnostics["legend_codes"] = known_codes or []
+            logger.info("  Extracted %d fixture codes from legend: %s", len(known_codes or []), known_codes)
         if not known_codes:
             logger.warning("  No codes found on legend page, falling back to defaults")
             known_codes = None
@@ -101,6 +110,9 @@ def run_takeoff(
     # Fall back to built-in list if no legend provided or parsing found nothing
     if known_codes is None:
         known_codes = KNOWN_LUMINAIRES
+        diagnostics["used_default_codes"] = True
+
+    diagnostics["active_codes"] = known_codes
 
     logger.info("Rendering PDF to images at %d DPI...", DPI)
     images = pdf_to_images(pdf_path, pages=pages)
@@ -125,6 +137,7 @@ def run_takeoff(
         # Skip non-plan pages (Cover, Legend, Site Plan, etc.)
         if floor_name in ("Cover", "Legend", "Site Plan"):
             logger.info("Skipping %s (page %d)", floor_name, page_num)
+            diagnostics["pages"][floor_name] = {"status": "skipped"}
             if progress_callback:
                 progress_callback(idx + 1, total_pages, f"Skipped {floor_name}")
             continue
@@ -142,6 +155,18 @@ def run_takeoff(
         recognised = [d for d in detections if d["fixture"] is not None]
         logger.info("  Recognised %d/%d fixtures", len(recognised), len(ovals))
 
+        # Collect raw OCR samples for diagnostics (first 10)
+        raw_samples = [
+            d["raw_text"] for d in detections if d["raw_text"]
+        ][:10]
+
+        diagnostics["pages"][floor_name] = {
+            "status": "processed",
+            "ovals_found": len(ovals),
+            "ovals_matched": len(recognised),
+            "raw_ocr_samples": raw_samples,
+        }
+
         page_results[floor_name] = detections
 
     # Aggregate counts
@@ -157,6 +182,7 @@ def run_takeoff(
     # Build output
     results = build_results_json(floor_counts, multipliers)
     results["txt_report"] = generate_txt_report(floor_counts, multipliers)
+    results["diagnostics"] = diagnostics
     if known_codes and known_codes is not KNOWN_LUMINAIRES:
         results["legend_codes"] = known_codes
 

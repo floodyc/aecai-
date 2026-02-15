@@ -12,6 +12,21 @@ export interface JobResponse {
   error: string | null;
 }
 
+export interface PageDiagnostics {
+  status: string;
+  ovals_found?: number;
+  ovals_matched?: number;
+  raw_ocr_samples?: string[];
+}
+
+export interface Diagnostics {
+  legend_page: number | null;
+  legend_codes: string[];
+  used_default_codes: boolean;
+  active_codes: string[];
+  pages: Record<string, PageDiagnostics>;
+}
+
 export interface TakeoffResults {
   floors: Record<string, Record<string, number>>;
   building_totals: Record<string, number>;
@@ -21,6 +36,7 @@ export interface TakeoffResults {
     luminaire_types: string[];
   };
   txt_report: string;
+  diagnostics?: Diagnostics;
 }
 
 export interface PagePreview {

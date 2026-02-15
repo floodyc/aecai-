@@ -1,6 +1,7 @@
 "use client";
 
-import { TakeoffResults, getReportUrl } from "@/lib/api";
+import { useState } from "react";
+import { TakeoffResults, Diagnostics, getReportUrl } from "@/lib/api";
 
 interface ResultsViewProps {
   jobId: string;
@@ -8,9 +9,10 @@ interface ResultsViewProps {
 }
 
 export default function ResultsView({ jobId, results }: ResultsViewProps) {
-  const { floors, building_totals, summary } = results;
+  const { floors, building_totals, summary, diagnostics } = results;
   const floorNames = Object.keys(floors);
   const types = summary.luminaire_types;
+  const [showDiag, setShowDiag] = useState(summary.total_fixtures === 0);
 
   const downloadJson = () => {
     const blob = new Blob([JSON.stringify(results, null, 2)], {
@@ -169,6 +171,169 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
           </table>
         </div>
       </div>
+
+      {/* Diagnostics Panel */}
+      {diagnostics && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setShowDiag(!showDiag)}
+            className="w-full px-5 py-4 border-b border-gray-800 flex items-center justify-between hover:bg-gray-800/30 transition-colors"
+          >
+            <h3 className="font-semibold text-gray-100 flex items-center gap-2">
+              {summary.total_fixtures === 0 && (
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+              )}
+              Pipeline Diagnostics
+            </h3>
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform ${
+                showDiag ? "rotate-180" : ""
+              }`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </button>
+
+          {showDiag && (
+            <div className="px-5 py-4 space-y-4 text-sm">
+              {/* Legend info */}
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                  Symbol Legend
+                </p>
+                {diagnostics.legend_page ? (
+                  <p className="text-gray-300">
+                    Page {diagnostics.legend_page} — extracted{" "}
+                    <span className="font-semibold text-primary-400">
+                      {diagnostics.legend_codes.length}
+                    </span>{" "}
+                    fixture codes
+                    {diagnostics.legend_codes.length > 0 && (
+                      <span className="text-gray-500">
+                        {" "}
+                        ({diagnostics.legend_codes.join(", ")})
+                      </span>
+                    )}
+                    {diagnostics.used_default_codes && (
+                      <span className="text-amber-400">
+                        {" "}
+                        — fell back to default codes
+                      </span>
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-amber-400">
+                    No legend page selected — used default codes (LT01–LT20)
+                  </p>
+                )}
+              </div>
+
+              {/* Active codes */}
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                  Active Fixture Codes ({diagnostics.active_codes.length})
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {diagnostics.active_codes.map((code) => (
+                    <span
+                      key={code}
+                      className="px-2 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 font-mono"
+                    >
+                      {code}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Per-page breakdown */}
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+                  Per-Page Detection
+                </p>
+                <div className="space-y-2">
+                  {Object.entries(diagnostics.pages).map(
+                    ([pageName, info]) => (
+                      <div
+                        key={pageName}
+                        className="bg-gray-950 border border-gray-800 rounded-lg px-4 py-2.5"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-gray-200 font-medium">
+                            {pageName}
+                          </span>
+                          {info.status === "skipped" ? (
+                            <span className="text-xs text-gray-500">
+                              Skipped
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">
+                              <span
+                                className={
+                                  info.ovals_found === 0
+                                    ? "text-red-400 font-semibold"
+                                    : "text-primary-400"
+                                }
+                              >
+                                {info.ovals_found} ovals
+                              </span>
+                              {" → "}
+                              <span
+                                className={
+                                  info.ovals_matched === 0
+                                    ? "text-amber-400"
+                                    : "text-green-400"
+                                }
+                              >
+                                {info.ovals_matched} matched
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                        {info.raw_ocr_samples &&
+                          info.raw_ocr_samples.length > 0 && (
+                            <div className="mt-1.5">
+                              <span className="text-[10px] text-gray-500 uppercase">
+                                Raw OCR samples:{" "}
+                              </span>
+                              <span className="text-xs text-gray-400 font-mono">
+                                {info.raw_ocr_samples
+                                  .map((s) => `"${s}"`)
+                                  .join(", ")}
+                              </span>
+                            </div>
+                          )}
+                        {info.status !== "skipped" &&
+                          info.ovals_found === 0 && (
+                            <p className="text-xs text-red-400 mt-1">
+                              No oval shapes detected. The drawing may use
+                              non-oval fixture symbols.
+                            </p>
+                          )}
+                        {info.status !== "skipped" &&
+                          (info.ovals_found ?? 0) > 0 &&
+                          info.ovals_matched === 0 && (
+                            <p className="text-xs text-amber-400 mt-1">
+                              Ovals found but no OCR text matched the active
+                              codes. Check legend selection.
+                            </p>
+                          )}
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Download Buttons */}
       <div className="flex flex-wrap gap-3">
