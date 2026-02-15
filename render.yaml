@@ -6,6 +6,6 @@ services:
     dockerContext: ./backend
     envVars:
       - key: CORS_ORIGINS
-        value: https://aecai.vercel.app,http://localhost:3000
+        value: https://aecai.vercel.app,https://aecai-*.vercel.app,http://localhost:3000
     healthCheckPath: /api/health
     plan: free
