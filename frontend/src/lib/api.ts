@@ -14,8 +14,9 @@ export interface JobResponse {
 
 export interface PageDiagnostics {
   status: string;
-  ovals_found?: number;
-  ovals_matched?: number;
+  detection_method?: string;
+  shapes_found?: number;
+  shapes_matched?: number;
   raw_ocr_samples?: string[];
 }
 

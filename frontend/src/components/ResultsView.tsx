@@ -275,24 +275,29 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                             </span>
                           ) : (
                             <span className="text-xs text-gray-400">
+                              {info.detection_method && (
+                                <span className="text-gray-600 mr-1.5">
+                                  [{info.detection_method}]
+                                </span>
+                              )}
                               <span
                                 className={
-                                  info.ovals_found === 0
+                                  info.shapes_found === 0
                                     ? "text-red-400 font-semibold"
                                     : "text-primary-400"
                                 }
                               >
-                                {info.ovals_found} ovals
+                                {info.shapes_found} shapes
                               </span>
                               {" → "}
                               <span
                                 className={
-                                  info.ovals_matched === 0
+                                  info.shapes_matched === 0
                                     ? "text-amber-400"
                                     : "text-green-400"
                                 }
                               >
-                                {info.ovals_matched} matched
+                                {info.shapes_matched} matched
                               </span>
                             </span>
                           )}
@@ -311,18 +316,18 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                             </div>
                           )}
                         {info.status !== "skipped" &&
-                          info.ovals_found === 0 && (
+                          info.shapes_found === 0 && (
                             <p className="text-xs text-red-400 mt-1">
-                              No oval shapes detected. The drawing may use
-                              non-oval fixture symbols.
+                              No shapes detected on this page. The drawing
+                              may use symbol types not yet supported.
                             </p>
                           )}
                         {info.status !== "skipped" &&
-                          (info.ovals_found ?? 0) > 0 &&
-                          info.ovals_matched === 0 && (
+                          (info.shapes_found ?? 0) > 0 &&
+                          info.shapes_matched === 0 && (
                             <p className="text-xs text-amber-400 mt-1">
-                              Ovals found but no OCR text matched the active
-                              codes. Check legend selection.
+                              Shapes found but no OCR text matched the legend
+                              codes. Check that the correct legend page is selected.
                             </p>
                           )}
                       </div>

@@ -19,7 +19,7 @@ from .config import DEFAULT_SHEET_MAP, DEFAULT_TYPICAL_MULTIPLIERS, DPI, KNOWN_L
 from .legend import parse_legend_page
 from .ocr import recognize_fixtures
 from .report import build_results_json, generate_txt_report
-from .shapes import find_ovals
+from .shapes import find_ovals, find_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -146,24 +146,33 @@ def run_takeoff(
         if progress_callback:
             progress_callback(idx + 1, total_pages, f"Processing {floor_name}")
 
-        # Detect ovals
+        # Detect shapes: try calibrated oval detector first, fall back to general
         ovals = find_ovals(image)
-        logger.info("  Found %d ovals on %s", len(ovals), floor_name)
+        detection_method = "ovals"
 
-        # OCR each oval using project-specific codes
+        if not ovals:
+            # Oval detector found nothing — try the general shape detector
+            ovals = find_symbols(image)
+            detection_method = "general"
+            logger.info("  Oval detector found 0, general detector found %d symbols on %s", len(ovals), floor_name)
+        else:
+            logger.info("  Found %d ovals on %s", len(ovals), floor_name)
+
+        # OCR each detected shape using project-specific codes
         detections = recognize_fixtures(image, ovals, known=known_codes)
         recognised = [d for d in detections if d["fixture"] is not None]
         logger.info("  Recognised %d/%d fixtures", len(recognised), len(ovals))
 
-        # Collect raw OCR samples for diagnostics (first 10)
+        # Collect raw OCR samples for diagnostics (first 15)
         raw_samples = [
             d["raw_text"] for d in detections if d["raw_text"]
-        ][:10]
+        ][:15]
 
         diagnostics["pages"][floor_name] = {
             "status": "processed",
-            "ovals_found": len(ovals),
-            "ovals_matched": len(recognised),
+            "detection_method": detection_method,
+            "shapes_found": len(ovals),
+            "shapes_matched": len(recognised),
             "raw_ocr_samples": raw_samples,
         }
 
