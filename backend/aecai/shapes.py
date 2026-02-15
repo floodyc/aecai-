@@ -56,6 +56,9 @@ def _contour_to_dict(cnt, area: float, circularity: float) -> dict:
     }
 
 
+MAX_OVALS = 500  # safety cap to prevent Tesseract from hanging
+
+
 def find_ovals(
     image: np.ndarray,
     *,
@@ -100,6 +103,12 @@ def find_ovals(
             continue
 
         x, y, w, h = cv2.boundingRect(cnt)
+
+        # Skip shapes too small in either dimension — text characters
+        # at 300 DPI are typically <20px wide, fixture ovals are >25px
+        if w < 25 or h < 15:
+            continue
+
         aspect = w / h if h > 0 else 0
         if aspect < min_aspect or aspect > max_aspect:
             continue
@@ -114,6 +123,14 @@ def find_ovals(
     # near-identical bounding boxes)
     ovals = _deduplicate(ovals)
 
+    # Cap to prevent OCR stage from hanging on very busy drawings
+    if len(ovals) > MAX_OVALS:
+        logger.warning("  Found %d ovals, capping to %d (sorted by circularity)",
+                        len(ovals), MAX_OVALS)
+        ovals.sort(key=lambda d: d["circularity"], reverse=True)
+        ovals = ovals[:MAX_OVALS]
+
+    logger.info("  Ovals after filtering: %d", len(ovals))
     return ovals
 
 

@@ -35,7 +35,7 @@ DPI = int(os.environ.get("AECAI_DPI", "300"))
 # Oval detection parameters (calibrated – do not change)
 # ---------------------------------------------------------------------------
 
-OVAL_MIN_AREA = 400
+OVAL_MIN_AREA = 600
 OVAL_MAX_AREA = 12000
 OVAL_MIN_ASPECT = 0.3
 OVAL_MAX_ASPECT = 3.5
