@@ -35,7 +35,7 @@ DPI = int(os.environ.get("AECAI_DPI", "300"))
 # Oval detection parameters (calibrated – do not change)
 # ---------------------------------------------------------------------------
 
-OVAL_MIN_AREA = 800
+OVAL_MIN_AREA = 400
 OVAL_MAX_AREA = 12000
 OVAL_MIN_ASPECT = 0.3
 OVAL_MAX_ASPECT = 3.5
@@ -45,7 +45,7 @@ OVAL_CIRCULARITY_THRESH = 0.55
 # OCR crop settings
 # ---------------------------------------------------------------------------
 
-CROP_PADDING = 6  # pixels around centre of oval for OCR crop
+CROP_PADDING = -4  # negative = expand crop beyond oval boundary to capture full text
 
 # ---------------------------------------------------------------------------
 # Fuzzy correction dictionary (tuned against real drawings)

@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 def crop_oval(image: np.ndarray, oval: dict, padding: int = CROP_PADDING) -> np.ndarray:
-    """Centre-crop around an oval detection, removing outer border pixels."""
+    """Crop around an oval detection.
+
+    padding > 0 shrinks inward, padding < 0 expands outward.
+    Negative padding ensures the full text (e.g. "LT04") is captured
+    even when letters are close to the oval boundary.
+    """
     h_img, w_img = image.shape[:2]
     x = max(oval["x"] + padding, 0)
     y = max(oval["y"] + padding, 0)
@@ -33,7 +38,6 @@ def crop_oval(image: np.ndarray, oval: dict, padding: int = CROP_PADDING) -> np.
     y2 = min(oval["y"] + oval["h"] - padding, h_img)
 
     if x2 <= x or y2 <= y:
-        # Fallback: use full bounding box
         x, y = oval["x"], oval["y"]
         x2, y2 = x + oval["w"], y + oval["h"]
 
@@ -41,16 +45,22 @@ def crop_oval(image: np.ndarray, oval: dict, padding: int = CROP_PADDING) -> np.
 
 
 def preprocess_for_ocr(crop: np.ndarray) -> np.ndarray:
-    """Resize and threshold a crop for better Tesseract accuracy."""
+    """Resize and threshold a crop for better Tesseract accuracy.
+
+    Scales small crops up to at least 120px on the longest side so
+    Tesseract can read small fixture codes like "LT04A".  Adds a white
+    border so characters at the edges aren't clipped.
+    """
     if len(crop.shape) == 3:
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     else:
         gray = crop
 
-    # Scale up small crops
+    # Scale up so the longest side is at least 120px
     h, w = gray.shape
-    if max(h, w) < 80:
-        scale = 80 / max(h, w)
+    target = 120
+    if max(h, w) < target:
+        scale = target / max(h, w)
         gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
 
     # Otsu binarisation
@@ -59,6 +69,9 @@ def preprocess_for_ocr(crop: np.ndarray) -> np.ndarray:
     # Invert if background is dark (text should be dark-on-light for Tesseract)
     if np.mean(binary) < 128:
         binary = cv2.bitwise_not(binary)
+
+    # Add white border — Tesseract needs some margin around characters
+    binary = cv2.copyMakeBorder(binary, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
 
     return binary
 
@@ -102,6 +115,17 @@ def fuzzy_correct(raw_text: str, known: list[str] | None = None, threshold: int 
     return None
 
 
+def _looks_like_fixture_code(text: str) -> bool:
+    """Check if cleaned text looks like a luminaire code (letters + digits).
+
+    Fixture codes have letters AND numbers (e.g. LT04, LT04A).
+    Bare numbers (04, 12) or bare letters (AB) are not fixture codes.
+    """
+    has_letter = any(c.isalpha() for c in text)
+    has_digit = any(c.isdigit() for c in text)
+    return has_letter and has_digit and len(text) >= 2
+
+
 def recognize_fixtures(
     image: np.ndarray,
     ovals: list[dict],
@@ -109,9 +133,9 @@ def recognize_fixtures(
 ) -> list[dict]:
     """OCR all detected ovals and return fixture identifications.
 
-    Every oval with readable text is counted. Fuzzy matching against known
-    codes is used for correction (e.g. "LTO4" → "LT04"), but ovals that
-    don't match any known code are still kept under their raw OCR text.
+    Only ovals whose text looks like a fixture code (letters + numbers)
+    are counted. Fuzzy matching against known codes corrects OCR errors
+    (e.g. "LTO4" → "LT04").
 
     Args:
         image: the page image (BGR or grayscale)
@@ -122,7 +146,7 @@ def recognize_fixtures(
     Returns a list of dicts:
         oval     – original oval dict
         raw_text – Tesseract output before correction
-        fixture  – corrected code if matched, or cleaned raw text, or None if empty
+        fixture  – corrected/cleaned code, or None if not a fixture
     """
     results = []
     for oval in ovals:
@@ -135,10 +159,10 @@ def recognize_fixtures(
         # Try fuzzy correction against known codes
         fixture = fuzzy_correct(raw, known=known)
 
-        # If no fuzzy match but there IS text, keep the cleaned raw text
+        # If no fuzzy match, check if raw text looks like a fixture code
         if fixture is None and raw:
             cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
-            if len(cleaned) >= 2:
+            if _looks_like_fixture_code(cleaned):
                 fixture = cleaned
 
         results.append(
