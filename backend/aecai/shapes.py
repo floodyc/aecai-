@@ -96,7 +96,6 @@ def _contour_to_dict(cnt, area: float, ellipse_fit: float) -> dict:
     }
 
 
-MAX_OVALS = 500  # safety cap to prevent Tesseract from hanging
 
 
 def find_ovals(
@@ -147,19 +146,22 @@ def find_ovals(
 
         x, y, w, h = cv2.boundingRect(cnt)
 
-        # Skip shapes too small in either dimension — text characters
-        # at 300 DPI are typically <20px wide, fixture ovals are >25px
-        if w < 25 or h < 12:
+        # Skip shapes too small — fixture ovals at 300 DPI are at least
+        # 25px in their long dimension and 12px in their short dimension.
+        # Check orientation-independent: long vs short side.
+        long_side = max(w, h)
+        short_side = min(w, h)
+        if long_side < 25 or short_side < 12:
             continue
 
-        # Aspect ratio filter: fixture ovals are wider than tall (1.2+)
-        # This eliminates circles (aspect ~1.0) like switches and outlets
-        aspect = w / h if h > 0 else 0
+        # Aspect ratio filter: fixture ovals are elongated (ratio >= 1.2).
+        # Use long/short so both horizontal AND vertical ovals pass.
+        aspect = long_side / short_side if short_side > 0 else 0
         if aspect < min_aspect or aspect > max_aspect:
             continue
 
         # Skip very large shapes (room outlines, title blocks)
-        if w > 200 or h > 100:
+        if long_side > 200 or short_side > 100:
             continue
 
         # Ellipse fit: how closely does the contour match an ellipse?
@@ -172,13 +174,6 @@ def find_ovals(
     # De-duplicate overlapping detections (nested contours can produce
     # near-identical bounding boxes)
     ovals = _deduplicate(ovals)
-
-    # Cap to prevent OCR stage from hanging on very busy drawings
-    if len(ovals) > MAX_OVALS:
-        logger.warning("  Found %d ovals, capping to %d (sorted by ellipse_fit)",
-                        len(ovals), MAX_OVALS)
-        ovals.sort(key=lambda d: abs(1.0 - d["ellipse_fit"]))
-        ovals = ovals[:MAX_OVALS]
 
     logger.info("  Ovals after filtering: %d", len(ovals))
     return ovals

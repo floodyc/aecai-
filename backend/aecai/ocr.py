@@ -206,17 +206,59 @@ _RETRY_STRATEGIES = [
 ]
 
 
+def _is_valid_prefix_match(text: str, prefix: str) -> bool:
+    """Check that text starts with prefix AND has at least one char after it."""
+    return (
+        text.startswith(prefix)
+        and len(text) > len(prefix)
+    )
+
+
+def _fuzzy_correct_with_prefix(
+    text: str,
+    prefix: str,
+    known: list[str],
+    threshold: int = FUZZY_THRESHOLD,
+) -> str:
+    """Try to fuzzy-correct a prefix-matched text against known codes.
+
+    If the text already matches a known code exactly, return it.
+    Otherwise find the closest known code that shares the same prefix.
+    Falls back to the original text if no good match is found.
+    """
+    if text in known:
+        return text
+
+    best_match = None
+    best_score = 0
+    for code in known:
+        if not code.startswith(prefix):
+            continue
+        score = fuzz.ratio(text, code)
+        if score > best_score:
+            best_score = score
+            best_match = code
+
+    if best_score >= threshold and best_match is not None:
+        return best_match
+    return text
+
+
 def _ocr_with_retries(
     image: np.ndarray,
     oval: dict,
     prefix: str,
+    known: list[str] | None = None,
 ) -> tuple[str, str | None]:
     """Try multiple crop/scale strategies until one produces a prefix match.
 
     Returns (raw_text, cleaned_fixture_or_None).
     The first attempt uses default settings; subsequent attempts use
     _RETRY_STRATEGIES.  Stops as soon as a prefix match is found.
+    After matching, fuzzy-corrects against known codes if available.
     """
+    codes = known or KNOWN_LUMINAIRES
+
     # First attempt: default crop + scale
     crop = crop_oval(image, oval)
     if crop.size == 0:
@@ -224,8 +266,8 @@ def _ocr_with_retries(
 
     raw = ocr_crop(crop)
     cleaned = _clean_and_normalize(raw)
-    if cleaned and cleaned.startswith(prefix):
-        return (raw, cleaned)
+    if cleaned and _is_valid_prefix_match(cleaned, prefix):
+        return (raw, _fuzzy_correct_with_prefix(cleaned, prefix, codes))
 
     # Retry with alternative strategies
     best_raw = raw
@@ -241,15 +283,15 @@ def _ocr_with_retries(
         retry_raw = ocr_crop(retry_crop, scale=strat["scale"])
         retry_cleaned = _clean_and_normalize(retry_raw)
 
-        if retry_cleaned and retry_cleaned.startswith(prefix):
+        if retry_cleaned and _is_valid_prefix_match(retry_cleaned, prefix):
             logger.debug(
                 "  Retry matched: %r → %s (strategy: %s)",
                 retry_raw, retry_cleaned, strat,
             )
-            return (retry_raw, retry_cleaned)
+            return (retry_raw, _fuzzy_correct_with_prefix(retry_cleaned, prefix, codes))
 
     # No strategy matched — return original attempt
-    return (best_raw, cleaned if cleaned and cleaned.startswith(prefix) else None)
+    return (best_raw, None)
 
 
 def _clean_and_normalize(raw: str) -> str | None:
