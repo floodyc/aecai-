@@ -49,8 +49,10 @@ def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_small, iterations=2)
 
     # Stage 2: merge text inside ovals into a solid blob
-    # 7x7 ellipse bridges gaps between characters and the oval wall
-    k_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    # 5x5 ellipse bridges gaps between characters and the oval wall
+    # without merging the oval with nearby drawing elements (dashed
+    # lines, junction-box circles, etc.)
+    k_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_large, iterations=1)
 
     return gray, binary
@@ -134,14 +136,19 @@ def find_ovals(
 
     logger.info("  Total contours found: %d", len(contours))
 
+    # Rejection counters for diagnostics
+    rej_area = rej_pts = rej_size = rej_aspect = rej_dim = rej_fit = 0
+
     ovals: list[dict] = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if area < min_area or area > max_area:
+            rej_area += 1
             continue
 
         # Need >=5 points to fit an ellipse
         if len(cnt) < 5:
+            rej_pts += 1
             continue
 
         x, y, w, h = cv2.boundingRect(cnt)
@@ -152,24 +159,33 @@ def find_ovals(
         long_side = max(w, h)
         short_side = min(w, h)
         if long_side < 25 or short_side < 12:
+            rej_size += 1
             continue
 
         # Aspect ratio filter: fixture ovals are elongated (ratio >= 1.2).
         # Use long/short so both horizontal AND vertical ovals pass.
         aspect = long_side / short_side if short_side > 0 else 0
         if aspect < min_aspect or aspect > max_aspect:
+            rej_aspect += 1
             continue
 
         # Skip very large shapes (room outlines, title blocks)
-        if long_side > 200 or short_side > 100:
+        if long_side > 250 or short_side > 120:
+            rej_dim += 1
             continue
 
         # Ellipse fit: how closely does the contour match an ellipse?
         fit = _ellipse_fit_ratio(cnt)
         if fit < fit_min or fit > fit_max:
+            rej_fit += 1
             continue
 
         ovals.append(_contour_to_dict(cnt, area, fit))
+
+    logger.info(
+        "  Rejected — area: %d, pts: %d, size: %d, aspect: %d, dim: %d, fit: %d",
+        rej_area, rej_pts, rej_size, rej_aspect, rej_dim, rej_fit,
+    )
 
     # De-duplicate overlapping detections (nested contours can produce
     # near-identical bounding boxes)
