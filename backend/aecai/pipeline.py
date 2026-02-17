@@ -64,6 +64,47 @@ def pdf_to_images(
     return cv_images
 
 
+def _render_single_page(
+    pdf_path: str | Path,
+    page_num: int,
+    dpi: int = DPI,
+) -> np.ndarray | None:
+    """Render a single PDF page to a BGR OpenCV image.
+
+    Returns None if the page cannot be rendered.
+    """
+    kwargs: dict[str, Any] = {
+        "dpi": dpi,
+        "first_page": page_num,
+        "last_page": page_num,
+    }
+    if POPPLER_PATH:
+        kwargs["poppler_path"] = POPPLER_PATH
+
+    try:
+        pil_images = convert_from_path(str(pdf_path), **kwargs)
+    except Exception as e:
+        logger.warning("Failed to render page %d: %s", page_num, e)
+        return None
+
+    if not pil_images:
+        return None
+
+    arr = np.array(pil_images[0])
+    bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    return bgr
+
+
+def _get_page_count(pdf_path: str | Path) -> int:
+    """Get total page count without rendering."""
+    from pdf2image import pdfinfo_from_path
+    kwargs: dict[str, Any] = {}
+    if POPPLER_PATH:
+        kwargs["poppler_path"] = POPPLER_PATH
+    info = pdfinfo_from_path(str(pdf_path), **kwargs)
+    return info.get("Pages", 0)
+
+
 def _extract_exemplar_templates(
     pdf_path: str | Path,
     exemplars: list[dict],
@@ -86,11 +127,10 @@ def _extract_exemplar_templates(
     templates: list[dict] = []
     for page_num, page_exemplars in by_page.items():
         # Render just this page at target DPI
-        page_images = pdf_to_images(pdf_path, dpi=target_dpi, pages=[page_num])
-        if not page_images:
+        img = _render_single_page(pdf_path, page_num, dpi=target_dpi)
+        if img is None:
             logger.warning("Could not render page %d for exemplar extraction", page_num)
             continue
-        img = page_images[0]
 
         for ex in page_exemplars:
             source_dpi = ex.get("source_dpi", 150)
@@ -190,23 +230,19 @@ def run_takeoff(
         logger.info("No prefix filter — capturing all ovals with text")
         diagnostics["legend_source"] = "all_ovals"
         diagnostics["active_codes"] = []
-    logger.info("Rendering PDF to images at %d DPI...", DPI)
-    images = pdf_to_images(pdf_path, pages=pages)
-
-    # Build page number list
+    # Build page number list — render one page at a time to stay under
+    # the 2 GB memory limit on Render (15 pages × 25 MB/page = 375 MB
+    # all at once, plus OpenCV intermediates easily exceeds the cap).
     if pages:
         page_numbers = sorted(pages)
     else:
-        page_numbers = list(range(1, len(images) + 1))
-
-    # Ensure we have the right count
-    if len(images) != len(page_numbers):
-        page_numbers = list(range(min(page_numbers), min(page_numbers) + len(images)))
+        total_count = _get_page_count(pdf_path)
+        page_numbers = list(range(1, total_count + 1))
 
     page_results: dict[str, list[dict]] = {}
-    total_pages = len(images)
+    total_pages = len(page_numbers)
 
-    for idx, (page_num, image) in enumerate(zip(page_numbers, images)):
+    for idx, page_num in enumerate(page_numbers):
         floor_name = sheet_map.get(page_num, f"Page {page_num}")
 
         # Skip non-plan pages ONLY when the user explicitly provided a sheet map
@@ -221,6 +257,13 @@ def run_takeoff(
         logger.info("Processing %s (page %d/%d)...", floor_name, idx + 1, total_pages)
         if progress_callback:
             progress_callback(idx + 1, total_pages, f"Processing {floor_name}")
+
+        # Render just this page at 300 DPI (one at a time to limit memory)
+        image = _render_single_page(pdf_path, page_num, dpi=DPI)
+        if image is None:
+            logger.warning("Skipping %s — failed to render", floor_name)
+            diagnostics["pages"][floor_name] = {"status": "render_failed"}
+            continue
 
         if use_template_matching:
             # ---- Template matching (user-provided exemplars) ----
@@ -265,6 +308,9 @@ def run_takeoff(
             }
 
         page_results[floor_name] = detections
+
+        # Free the page image to keep memory bounded to 1 page at a time
+        del image
 
     # Aggregate counts
     floor_counts: dict[str, Counter] = {}
