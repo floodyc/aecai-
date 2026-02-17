@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import UploadZone from "@/components/UploadZone";
 import PageSelector from "@/components/PageSelector";
-import { previewPdf, startTakeoff, PreviewResponse } from "@/lib/api";
+import { previewPdf, startTakeoff, PreviewResponse, Exemplar } from "@/lib/api";
 
 const planLabels: Record<string, string> = {
   trial: "Free Trial",
@@ -58,7 +58,8 @@ export default function DashboardPage() {
     selectedPages: number[] | null,
     legendPage: number | null,
     legendImage: File | null,
-    fixturePrefix: string | null
+    fixturePrefix: string | null,
+    exemplars?: Exemplar[]
   ) => {
     if (!preview) return;
     setIsProcessing(true);
@@ -70,7 +71,8 @@ export default function DashboardPage() {
         selectedPages ?? undefined,
         legendPage ?? undefined,
         legendImage ?? undefined,
-        fixturePrefix ?? undefined
+        fixturePrefix ?? undefined,
+        exemplars && exemplars.length > 0 ? exemplars : undefined
       );
       router.push(`/takeoff/${job.id}`);
     } catch (err) {
@@ -252,6 +254,7 @@ export default function DashboardPage() {
           </div>
 
           <PageSelector
+            previewId={preview!.preview_id}
             pages={preview!.pages}
             onProcess={handleProcess}
             isProcessing={isProcessing}

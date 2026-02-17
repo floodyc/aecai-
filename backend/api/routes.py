@@ -165,6 +165,44 @@ async def preview_pdf(file: UploadFile):
     )
 
 
+@router.get("/takeoff/preview/{preview_id}/page/{page_num}")
+async def get_page_image(preview_id: str, page_num: int, dpi: int = 150):
+    """Return a medium-res JPEG of a single page for exemplar selection.
+
+    The user draws bounding boxes on this image to select fixture exemplars.
+    Coordinates are in image-pixel space; the backend scales to 300 DPI
+    at processing time.
+    """
+    tmp_path = _preview_files.get(preview_id)
+    if not tmp_path:
+        raise HTTPException(status_code=404, detail="Preview not found")
+
+    dpi = min(max(dpi, 72), 300)  # clamp
+
+    kwargs: dict[str, Any] = {
+        "dpi": dpi,
+        "first_page": page_num,
+        "last_page": page_num,
+    }
+    if POPPLER_PATH:
+        kwargs["poppler_path"] = POPPLER_PATH
+
+    try:
+        pil_images = convert_from_path(tmp_path, **kwargs)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to render page: {e}")
+
+    if not pil_images:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    buf = io.BytesIO()
+    pil_images[0].save(buf, format="JPEG", quality=85)
+    buf.seek(0)
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(buf, media_type="image/jpeg")
+
+
 @router.post("/takeoff", response_model=JobResponse)
 async def start_takeoff(request: Request):
     """Start a takeoff job.
@@ -189,6 +227,7 @@ async def start_takeoff(request: Request):
     file = form.get("file")
     legend_image = form.get("legend_image")
     fixture_prefix = form.get("fixture_prefix")
+    exemplars_raw = form.get("exemplars")
 
     _log.info("Takeoff request: preview_id=%s, fixture_prefix=%s, legend_image=%s (type=%s)",
               preview_id, fixture_prefix, legend_image, type(legend_image).__name__)
@@ -287,6 +326,16 @@ async def start_takeoff(request: Request):
     if parsed_fixture_prefix == "":
         parsed_fixture_prefix = None
 
+    # Parse exemplar bounding boxes — user-drawn symbol selections
+    # Format: [{label, page, x, y, w, h, source_dpi}]
+    parsed_exemplars: list[dict] | None = None
+    if exemplars_raw:
+        try:
+            parsed_exemplars = json.loads(str(exemplars_raw))
+            _log.info("Received %d exemplar selections", len(parsed_exemplars))
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid exemplars JSON")
+
     job = create_job(
         pdf_path=tmp_path,
         pages=parsed_pages,
@@ -295,6 +344,7 @@ async def start_takeoff(request: Request):
         legend_page=parsed_legend_page,
         legend_image_path=legend_image_path,
         fixture_prefix=parsed_fixture_prefix,
+        exemplars=parsed_exemplars,
     )
 
     return _job_to_response(job)

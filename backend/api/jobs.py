@@ -45,6 +45,7 @@ class Job:
     legend_page: int | None = None
     legend_image_path: str | None = None
     fixture_prefix: str | None = None
+    exemplars: list[dict[str, Any]] | None = None
 
     def __post_init__(self):
         if not self.created_at:
@@ -64,6 +65,7 @@ def create_job(
     legend_page: int | None = None,
     legend_image_path: str | None = None,
     fixture_prefix: str | None = None,
+    exemplars: list[dict] | None = None,
 ) -> Job:
     """Create a new takeoff job and start processing in a background thread."""
     job_id = uuid.uuid4().hex[:12]
@@ -76,6 +78,7 @@ def create_job(
         legend_page=legend_page,
         legend_image_path=legend_image_path,
         fixture_prefix=fixture_prefix,
+        exemplars=exemplars,
     )
 
     with _lock:
@@ -118,6 +121,7 @@ def _process_job(job_id: str) -> None:
             legend_page=job.legend_page,
             legend_image_path=job.legend_image_path,
             fixture_prefix=job.fixture_prefix,
+            exemplars=job.exemplars,
             progress_callback=progress_callback,
         )
 

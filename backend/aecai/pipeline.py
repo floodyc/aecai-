@@ -25,6 +25,7 @@ from .config import DPI, POPPLER_PATH
 from .ocr import recognize_fixtures
 from .report import build_results_json, generate_txt_report
 from .shapes import find_ovals
+from .symbol_match import match_templates_on_page
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,67 @@ def pdf_to_images(
     return cv_images
 
 
+def _extract_exemplar_templates(
+    pdf_path: str | Path,
+    exemplars: list[dict],
+    target_dpi: int = DPI,
+) -> list[dict]:
+    """Render exemplar source pages and crop templates at target DPI.
+
+    Each exemplar dict has: {label, page, x, y, w, h, source_dpi}.
+    Coordinates are in source_dpi image-pixel space.  We render at
+    target_dpi and scale the crop coordinates accordingly.
+
+    Returns list of {code: str, template: np.ndarray} for symbol_match.
+    """
+    # Group exemplars by source page to avoid re-rendering
+    from collections import defaultdict
+    by_page: dict[int, list[dict]] = defaultdict(list)
+    for ex in exemplars:
+        by_page[ex["page"]].append(ex)
+
+    templates: list[dict] = []
+    for page_num, page_exemplars in by_page.items():
+        # Render just this page at target DPI
+        page_images = pdf_to_images(pdf_path, dpi=target_dpi, pages=[page_num])
+        if not page_images:
+            logger.warning("Could not render page %d for exemplar extraction", page_num)
+            continue
+        img = page_images[0]
+
+        for ex in page_exemplars:
+            source_dpi = ex.get("source_dpi", 150)
+            scale = target_dpi / source_dpi
+
+            x = int(ex["x"] * scale)
+            y = int(ex["y"] * scale)
+            w = int(ex["w"] * scale)
+            h = int(ex["h"] * scale)
+
+            # Clamp to image bounds
+            h_img, w_img = img.shape[:2]
+            x = max(0, min(x, w_img - 1))
+            y = max(0, min(y, h_img - 1))
+            w = min(w, w_img - x)
+            h = min(h, h_img - y)
+
+            if w < 5 or h < 5:
+                logger.warning("Exemplar crop too small: %s (%dx%d)", ex["label"], w, h)
+                continue
+
+            crop = img[y:y + h, x:x + w]
+
+            # Convert to grayscale for template matching
+            if len(crop.shape) == 3:
+                crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+            templates.append({"code": ex["label"], "template": crop})
+            logger.info("Extracted exemplar template: %s (%dx%d from page %d)",
+                        ex["label"], w, h, page_num)
+
+    return templates
+
+
 def run_takeoff(
     pdf_path: str | Path,
     pages: list[int] | None = None,
@@ -71,6 +133,7 @@ def run_takeoff(
     legend_page: int | None = None,
     legend_image_path: str | Path | None = None,
     fixture_prefix: str | None = None,
+    exemplars: list[dict] | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Run the full takeoff pipeline on a PDF.
@@ -83,6 +146,8 @@ def run_takeoff(
         legend_page: 1-based page number of the symbol legend sheet.
         legend_image_path: path to a user-uploaded image (PNG/JPG) of the
                           lighting fixture legend table.
+        exemplars: user-drawn bounding boxes for visual template matching.
+                   List of {label, page, x, y, w, h, source_dpi}.
         progress_callback: called with (current_page, total_pages, floor_name)
 
     Returns:
@@ -103,6 +168,17 @@ def run_takeoff(
         "fixture_prefix": fixture_prefix,
         "pages": {},
     }
+
+    # Extract exemplar templates (user-drawn bounding boxes)
+    templates: list[dict] = []
+    if exemplars:
+        logger.info("Extracting %d exemplar templates...", len(exemplars))
+        templates = _extract_exemplar_templates(pdf_path, exemplars)
+        logger.info("Extracted %d templates", len(templates))
+        diagnostics["exemplars_provided"] = len(exemplars)
+        diagnostics["templates_extracted"] = len(templates)
+
+    use_template_matching = len(templates) > 0
 
     # All ovals with alphanumeric text are captured.
     # Prefix, if provided, acts as an optional filter.
@@ -146,25 +222,47 @@ def run_takeoff(
         if progress_callback:
             progress_callback(idx + 1, total_pages, f"Processing {floor_name}")
 
-        # Find ovals on the page
-        ovals = find_ovals(image)
-        logger.info("  Found %d ovals on %s", len(ovals), floor_name)
+        if use_template_matching:
+            # ---- Template matching (user-provided exemplars) ----
+            tmpl_detections = match_templates_on_page(image, templates)
+            logger.info("  Template matching: %d detections on %s",
+                        len(tmpl_detections), floor_name)
 
-        # OCR each oval — capture all alphanumeric text, optionally filter by prefix
-        detections = recognize_fixtures(image, ovals, prefix=fixture_prefix)
-        recognised = [d for d in detections if d["fixture"] is not None]
-        logger.info("  Recognised %d/%d fixtures", len(recognised), len(ovals))
+            # Convert template match results to the same format as OCR detections
+            detections = []
+            for td in tmpl_detections:
+                detections.append({
+                    "oval": {"x": td["x"], "y": td["y"],
+                             "w": td["w"], "h": td["h"]},
+                    "raw_text": td["code"],
+                    "fixture": td["fixture"],
+                    "score": td["score"],
+                    "detection_method": "template",
+                })
 
-        # Collect raw OCR samples for diagnostics
-        raw_samples = [d["raw_text"] for d in detections if d["raw_text"]][:15]
+            diagnostics["pages"][floor_name] = {
+                "status": "processed",
+                "detection_method": "template",
+                "template_matches": len(tmpl_detections),
+            }
+        else:
+            # ---- Oval detection + OCR (default pipeline) ----
+            ovals = find_ovals(image)
+            logger.info("  Found %d ovals on %s", len(ovals), floor_name)
 
-        diagnostics["pages"][floor_name] = {
-            "status": "processed",
-            "detection_method": "ovals",
-            "shapes_found": len(ovals),
-            "shapes_matched": len(recognised),
-            "raw_ocr_samples": raw_samples,
-        }
+            detections = recognize_fixtures(image, ovals, prefix=fixture_prefix)
+            recognised = [d for d in detections if d["fixture"] is not None]
+            logger.info("  Recognised %d/%d fixtures", len(recognised), len(ovals))
+
+            raw_samples = [d["raw_text"] for d in detections if d["raw_text"]][:15]
+
+            diagnostics["pages"][floor_name] = {
+                "status": "processed",
+                "detection_method": "ovals",
+                "shapes_found": len(ovals),
+                "shapes_matched": len(recognised),
+                "raw_ocr_samples": raw_samples,
+            }
 
         page_results[floor_name] = detections
 

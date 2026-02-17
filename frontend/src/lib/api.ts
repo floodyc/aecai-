@@ -75,12 +75,23 @@ export async function previewPdf(file: File): Promise<PreviewResponse> {
   return res.json();
 }
 
+export interface Exemplar {
+  label: string;
+  page: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  source_dpi: number;
+}
+
 export async function startTakeoff(
   previewId: string,
   pages?: number[],
   legendPage?: number,
   legendImage?: File,
-  fixturePrefix?: string
+  fixturePrefix?: string,
+  exemplars?: Exemplar[]
 ): Promise<JobResponse> {
   const formData = new FormData();
   formData.append("preview_id", previewId);
@@ -92,6 +103,9 @@ export async function startTakeoff(
   }
   if (fixturePrefix) {
     formData.append("fixture_prefix", fixturePrefix);
+  }
+  if (exemplars && exemplars.length > 0) {
+    formData.append("exemplars", JSON.stringify(exemplars));
   }
   if (legendImage) {
     // Send as base64 text field to avoid multipart file parsing issues

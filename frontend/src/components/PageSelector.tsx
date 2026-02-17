@@ -2,19 +2,24 @@
 
 import { useState, useRef } from "react";
 import { PagePreview } from "@/lib/api";
+import type { Exemplar } from "@/lib/api";
+import ExemplarSelector from "./ExemplarSelector";
 
 interface PageSelectorProps {
+  previewId: string;
   pages: PagePreview[];
   onProcess: (
     selectedPages: number[] | null,
     legendPage: number | null,
     legendImage: File | null,
-    fixturePrefix: string | null
+    fixturePrefix: string | null,
+    exemplars: Exemplar[]
   ) => void;
   isProcessing: boolean;
 }
 
 export default function PageSelector({
+  previewId,
   pages,
   onProcess,
   isProcessing,
@@ -40,6 +45,10 @@ export default function PageSelector({
 
   // Fixture code prefix (e.g. "LT") — user tells us what codes start with
   const [fixturePrefix, setFixturePrefix] = useState("");
+
+  // Exemplar bounding boxes (user-drawn symbol selections)
+  const [exemplars, setExemplars] = useState<Exemplar[]>([]);
+  const [exemplarPage, setExemplarPage] = useState<number | null>(null);
 
   const togglePage = (pageNum: number) => {
     setSelected((prev) => {
@@ -104,7 +113,7 @@ export default function PageSelector({
         ? null
         : Array.from(selected).sort((a, b) => a - b);
     const prefix = fixturePrefix.trim() || null;
-    onProcess(selectedPages, legendPageNum, legendImage, prefix);
+    onProcess(selectedPages, legendPageNum, legendImage, prefix, exemplars);
   };
 
   const hasLegend = legendPageNum !== null || legendImage !== null;
@@ -232,6 +241,80 @@ export default function PageSelector({
           className="w-56 px-3 py-2 bg-gray-950 border border-gray-700 rounded-lg text-sm text-gray-100 font-mono placeholder:text-gray-600 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
         />
       </div>
+
+      {/* Symbol Exemplar Selection */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-sm font-medium text-gray-200">
+            Symbol Exemplars{" "}
+            <span className="text-gray-500 font-normal">(optional)</span>
+          </label>
+          {exemplars.length > 0 && (
+            <span className="text-xs text-primary-400 font-medium tabular-nums">
+              {exemplars.length} selected
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-gray-500 mb-3">
+          Draw bounding boxes around fixture symbols on a page. The system will
+          find all matching symbols across all pages using template matching.
+          For fixtures in different orientations, box one of each.
+        </p>
+
+        {exemplars.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-3">
+            {Array.from(new Set(exemplars.map((e) => e.label))).map((label) => {
+              const count = exemplars.filter((e) => e.label === label).length;
+              return (
+                <span
+                  key={label}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-800 border border-gray-700 rounded-lg text-xs font-mono text-gray-200"
+                >
+                  {label}
+                  <span className="text-gray-500">
+                    ({count} exemplar{count !== 1 ? "s" : ""})
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {pages.map((page) => (
+            <button
+              key={page.page_number}
+              onClick={() => setExemplarPage(page.page_number)}
+              className={`px-3 py-1.5 border rounded-lg text-xs font-medium transition-colors ${
+                exemplars.some((e) => e.page === page.page_number)
+                  ? "bg-primary-950/30 border-primary-700 text-primary-300 hover:bg-primary-950/50"
+                  : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-300"
+              }`}
+            >
+              Pg {page.page_number}
+              {exemplars.some((e) => e.page === page.page_number) && (
+                <span className="ml-1 text-primary-500">
+                  ({exemplars.filter((e) => e.page === page.page_number).length})
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ExemplarSelector modal */}
+      {exemplarPage !== null && (
+        <ExemplarSelector
+          previewId={previewId}
+          pageNumber={exemplarPage}
+          existingExemplars={exemplars}
+          onSave={(updated) => {
+            setExemplars(updated);
+            setExemplarPage(null);
+          }}
+          onClose={() => setExemplarPage(null)}
+        />
+      )}
 
       {/* Controls */}
       <div className="flex items-center justify-between">
