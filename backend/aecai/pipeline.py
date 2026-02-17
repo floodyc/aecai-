@@ -105,61 +105,16 @@ def run_takeoff(
         "pages": {},
     }
 
-    # --- Determine matching strategy ---
-    known_codes: list[str] | None = None
-
+    # All ovals with alphanumeric text are captured.
+    # Prefix, if provided, acts as an optional filter.
     if fixture_prefix:
-        # User specified a prefix — skip legend parsing entirely.
-        # The OCR module will match any text starting with this prefix.
-        logger.info("Using fixture prefix '%s' — skipping legend parsing", fixture_prefix)
+        logger.info("Fixture prefix filter: '%s'", fixture_prefix)
         diagnostics["legend_source"] = "prefix"
         diagnostics["active_codes"] = [f"{fixture_prefix}*"]
     else:
-        # Legacy: parse legend for known codes
-        # Priority 1: user-uploaded legend image
-        if legend_image_path:
-            logger.info("Parsing uploaded legend image for codes...")
-            if progress_callback:
-                progress_callback(0, 0, "Reading legend image...")
-            legend_img = cv2.imread(str(legend_image_path))
-            if legend_img is not None:
-                known_codes = parse_legend_page(legend_img)
-                if known_codes:
-                    diagnostics["legend_codes"] = known_codes
-                    diagnostics["legend_source"] = "uploaded_image"
-                    logger.info("  Extracted %d codes from legend image: %s",
-                                len(known_codes), known_codes)
-                else:
-                    logger.warning("  No codes found in legend image")
-                    known_codes = None
-            else:
-                logger.warning("  Could not read legend image file")
-
-        # Priority 2: legend page from the PDF
-        if known_codes is None and legend_page:
-            logger.info("Parsing legend page %d for codes...", legend_page)
-            if progress_callback:
-                progress_callback(0, 0, "Reading symbol legend...")
-            legend_images = pdf_to_images(pdf_path, pages=[legend_page])
-            if legend_images:
-                known_codes = parse_legend_page(legend_images[0])
-                if known_codes:
-                    diagnostics["legend_codes"] = known_codes
-                    diagnostics["legend_source"] = "pdf_page"
-                    logger.info("  Extracted %d codes from legend page: %s",
-                                len(known_codes), known_codes)
-                else:
-                    logger.warning("  No codes found on legend page, using defaults")
-                    known_codes = None
-
-        # Fall back to built-in codes
-        if known_codes is None:
-            known_codes = KNOWN_LUMINAIRES
-            diagnostics["used_default_codes"] = True
-            diagnostics["legend_source"] = "defaults"
-
-        diagnostics["active_codes"] = known_codes
-        logger.info("Active codes (%d): %s", len(known_codes), known_codes)
+        logger.info("No prefix filter — capturing all ovals with text")
+        diagnostics["legend_source"] = "all_ovals"
+        diagnostics["active_codes"] = []
     logger.info("Rendering PDF to images at %d DPI...", DPI)
     images = pdf_to_images(pdf_path, pages=pages)
 
@@ -196,9 +151,8 @@ def run_takeoff(
         ovals = find_ovals(image)
         logger.info("  Found %d ovals on %s", len(ovals), floor_name)
 
-        # OCR each oval and match against known codes or prefix
-        detections = recognize_fixtures(image, ovals, known=known_codes,
-                                        prefix=fixture_prefix)
+        # OCR each oval — capture all alphanumeric text, optionally filter by prefix
+        detections = recognize_fixtures(image, ovals, prefix=fixture_prefix)
         recognised = [d for d in detections if d["fixture"] is not None]
         logger.info("  Recognised %d/%d fixtures", len(recognised), len(ovals))
 

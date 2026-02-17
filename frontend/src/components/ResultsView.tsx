@@ -204,71 +204,17 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                 </p>
                 {diagnostics.fixture_prefix ? (
                   <p className="text-gray-300">
-                    Prefix match:{" "}
+                    All ovals captured, filtered by prefix:{" "}
                     <span className="font-mono font-semibold text-primary-400">
                       {diagnostics.fixture_prefix}*
-                    </span>{" "}
-                    — matching any oval text starting with &quot;{diagnostics.fixture_prefix}&quot;
-                  </p>
-                ) : diagnostics.legend_source === "uploaded_image" ? (
-                  <p className="text-gray-300">
-                    Uploaded legend image — extracted{" "}
-                    <span className="font-semibold text-primary-400">
-                      {diagnostics.legend_codes.length}
-                    </span>{" "}
-                    fixture codes
-                    {diagnostics.legend_codes.length > 0 && (
-                      <span className="text-gray-500">
-                        {" "}
-                        ({diagnostics.legend_codes.join(", ")})
-                      </span>
-                    )}
-                  </p>
-                ) : diagnostics.legend_page ? (
-                  <p className="text-gray-300">
-                    Page {diagnostics.legend_page} — extracted{" "}
-                    <span className="font-semibold text-primary-400">
-                      {diagnostics.legend_codes.length}
-                    </span>{" "}
-                    fixture codes
-                    {diagnostics.legend_codes.length > 0 && (
-                      <span className="text-gray-500">
-                        {" "}
-                        ({diagnostics.legend_codes.join(", ")})
-                      </span>
-                    )}
-                    {diagnostics.used_default_codes && (
-                      <span className="text-amber-400">
-                        {" "}
-                        — fell back to default codes
-                      </span>
-                    )}
+                    </span>
                   </p>
                 ) : (
-                  <p className="text-amber-400">
-                    No legend provided — used default codes
+                  <p className="text-gray-300">
+                    All ovals with alphanumeric text captured (no prefix filter)
                   </p>
                 )}
               </div>
-
-              {/* Active codes (hide when using prefix mode) */}
-              {!diagnostics.fixture_prefix && (
-                <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                    Active Fixture Codes ({diagnostics.active_codes.length})
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {diagnostics.active_codes.map((code) => (
-                      <span
-                        key={code}
-                        className="px-2 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300 font-mono"
-                      >
-                        {code}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               {/* Per-page breakdown */}
               <div>

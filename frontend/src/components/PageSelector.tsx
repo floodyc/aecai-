@@ -209,26 +209,27 @@ export default function PageSelector({
         </div>
       </div>
 
-      {/* Fixture Code Prefix */}
+      {/* Fixture Code Prefix (optional filter) */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
         <label
           htmlFor="fixture-prefix"
           className="block text-sm font-medium text-gray-200 mb-1"
         >
-          Fixture Code Prefix
+          Fixture Code Prefix{" "}
+          <span className="text-gray-500 font-normal">(optional)</span>
         </label>
         <p className="text-xs text-gray-500 mb-3">
-          Enter the prefix that fixture codes start with (e.g.{" "}
-          <span className="font-mono text-gray-400">LT</span> for LT04, LT12A).
-          Only ovals with matching text will be counted.
+          Every oval with text will be captured. To filter, enter a prefix
+          (e.g. <span className="font-mono text-gray-400">LT</span>) and only
+          matching codes will be included.
         </p>
         <input
           id="fixture-prefix"
           type="text"
           value={fixturePrefix}
           onChange={(e) => setFixturePrefix(e.target.value.toUpperCase())}
-          placeholder="e.g. LT"
-          className="w-40 px-3 py-2 bg-gray-950 border border-gray-700 rounded-lg text-sm text-gray-100 font-mono placeholder:text-gray-600 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+          placeholder="Leave blank to capture all"
+          className="w-56 px-3 py-2 bg-gray-950 border border-gray-700 rounded-lg text-sm text-gray-100 font-mono placeholder:text-gray-600 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
         />
       </div>
 
