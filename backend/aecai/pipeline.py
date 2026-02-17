@@ -4,9 +4,9 @@ This is the main orchestrator that ties together PDF rendering, oval detection,
 OCR, and report generation.  The web API calls this module.
 
 Detection approach:
-1. Parse legend (uploaded image or PDF page) to extract LT fixture codes
-2. Find ovals on each floor plan page
-3. OCR text inside each oval, fuzzy-match against known LT codes
+1. Find ovals on each floor plan page
+2. OCR text inside each oval — every oval with alphanumeric text is captured
+3. Optionally filter by a user-supplied prefix
 4. Aggregate counts per floor
 """
 
@@ -17,12 +17,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
-import cv2
 import numpy as np
 from pdf2image import convert_from_path
 
-from .config import DPI, KNOWN_LUMINAIRES, POPPLER_PATH
-from .legend import parse_legend_page
+from .config import DPI, POPPLER_PATH
 from .ocr import recognize_fixtures
 from .report import build_results_json, generate_txt_report
 from .shapes import find_ovals
@@ -183,8 +181,6 @@ def run_takeoff(
     results = build_results_json(floor_counts, multipliers)
     results["txt_report"] = generate_txt_report(floor_counts, multipliers)
     results["diagnostics"] = diagnostics
-    if known_codes and known_codes is not KNOWN_LUMINAIRES:
-        results["legend_codes"] = known_codes
 
     if progress_callback:
         progress_callback(total_pages, total_pages, "Complete")
