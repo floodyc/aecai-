@@ -170,7 +170,7 @@ def find_ovals(
             continue
 
         # Skip very large shapes (room outlines, title blocks)
-        if long_side > 250 or short_side > 120:
+        if long_side > 200 or short_side > 100:
             rej_dim += 1
             continue
 
