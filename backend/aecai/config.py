@@ -53,31 +53,6 @@ CROP_MARGIN_H = 0.15  # 15% horizontal margin
 CROP_MARGIN_V = 0.20  # 20% vertical margin
 
 # ---------------------------------------------------------------------------
-# Fuzzy correction dictionary (tuned against real drawings)
-# ---------------------------------------------------------------------------
-
-KNOWN_LUMINAIRES = [
-    "LT01", "LT01A", "LT01B",
-    "LT02", "LT02A", "LT02B",
-    "LT03", "LT03A", "LT03B",
-    "LT04", "LT04A", "LT04B",
-    "LT05", "LT05A", "LT05B",
-    "LT06", "LT06A",
-    "LT07", "LT07A",
-    "LT08", "LT08A",
-    "LT09", "LT09A",
-    "LT10", "LT10A",
-    "LT11", "LT11A",
-    "LT12", "LT12A",
-    "LT13", "LT14", "LT15", "LT16", "LT17", "LT18", "LT19", "LT20",
-    "LT21", "LT22", "LT23", "LT24", "LT25",
-    "LT30", "LT31", "LT32", "LT33", "LT34", "LT35",
-    "LT40", "LT41", "LT42", "LT43", "LT44", "LT45", "LT46", "LT47", "LT48",
-]
-
-FUZZY_THRESHOLD = 75  # minimum fuzz ratio to accept a correction
-
-# ---------------------------------------------------------------------------
 # Default sheet → floor mapping (UBC Lot 4 IFC project-specific)
 # For the web app this is configurable per job.
 # ---------------------------------------------------------------------------

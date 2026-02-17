@@ -1,8 +1,8 @@
 """OCR module – reads fixture codes from detected ovals on floor plans.
 
 Strategy: crop each detected oval INWARD (15% horiz / 20% vert) to remove
-the drawn oval border, upscale 3x, Tesseract PSM-8 (single word), then
-fuzzy-correct against known codes with prefix normalization and suffix fixes.
+the drawn oval border, upscale, Tesseract PSM-8 (single word), then apply
+prefix normalization and suffix fixes.
 """
 
 from __future__ import annotations
@@ -13,13 +13,10 @@ import re
 import cv2
 import numpy as np
 import pytesseract
-from thefuzz import fuzz
 
 from .config import (
     CROP_MARGIN_H,
     CROP_MARGIN_V,
-    FUZZY_THRESHOLD,
-    KNOWN_LUMINAIRES,
     TESSERACT_CMD,
 )
 
@@ -152,43 +149,14 @@ def _normalize_suffix(text: str) -> str:
     return text
 
 
-def fuzzy_correct(raw_text: str, known: list[str] | None = None, threshold: int = FUZZY_THRESHOLD) -> str | None:
-    """Fuzzy-match OCR text against known luminaire codes.
-
-    Applies prefix/suffix normalization before matching.
-    Returns the best match if the score is above threshold, else None.
-    """
-    if not raw_text:
+def _clean_and_normalize(raw: str) -> str | None:
+    """Strip non-alphanumeric chars, uppercase, apply prefix/suffix fixes."""
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+    if not cleaned or len(cleaned) < 2:
         return None
-
-    known = known or KNOWN_LUMINAIRES
-
-    # Clean: strip non-alphanumeric, uppercase
-    cleaned = re.sub(r"[^A-Za-z0-9]", "", raw_text).upper()
-    if not cleaned:
-        return None
-
-    # Apply OCR error corrections
     cleaned = _normalize_prefix(cleaned)
     cleaned = _normalize_suffix(cleaned)
-
-    # If cleaned text exactly matches a known code, return immediately
-    if cleaned in known:
-        return cleaned
-
-    # Fuzzy match
-    best_match = None
-    best_score = 0
-
-    for code in known:
-        score = fuzz.ratio(cleaned, code)
-        if score > best_score:
-            best_score = score
-            best_match = code
-
-    if best_score >= threshold:
-        return best_match
-    return None
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -214,51 +182,17 @@ def _is_valid_prefix_match(text: str, prefix: str) -> bool:
     )
 
 
-def _fuzzy_correct_with_prefix(
-    text: str,
-    prefix: str,
-    known: list[str],
-    threshold: int = FUZZY_THRESHOLD,
-) -> str:
-    """Try to fuzzy-correct a prefix-matched text against known codes.
-
-    If the text already matches a known code exactly, return it.
-    Otherwise find the closest known code that shares the same prefix.
-    Falls back to the original text if no good match is found.
-    """
-    if text in known:
-        return text
-
-    best_match = None
-    best_score = 0
-    for code in known:
-        if not code.startswith(prefix):
-            continue
-        score = fuzz.ratio(text, code)
-        if score > best_score:
-            best_score = score
-            best_match = code
-
-    if best_score >= threshold and best_match is not None:
-        return best_match
-    return text
-
-
 def _ocr_with_retries(
     image: np.ndarray,
     oval: dict,
     prefix: str,
-    known: list[str] | None = None,
 ) -> tuple[str, str | None]:
     """Try multiple crop/scale strategies until one produces a prefix match.
 
     Returns (raw_text, cleaned_fixture_or_None).
     The first attempt uses default settings; subsequent attempts use
     _RETRY_STRATEGIES.  Stops as soon as a prefix match is found.
-    After matching, fuzzy-corrects against known codes if available.
     """
-    codes = known or KNOWN_LUMINAIRES
-
     # First attempt: default crop + scale
     crop = crop_oval(image, oval)
     if crop.size == 0:
@@ -267,7 +201,7 @@ def _ocr_with_retries(
     raw = ocr_crop(crop)
     cleaned = _clean_and_normalize(raw)
     if cleaned and _is_valid_prefix_match(cleaned, prefix):
-        return (raw, _fuzzy_correct_with_prefix(cleaned, prefix, codes))
+        return (raw, cleaned)
 
     # Retry with alternative strategies
     best_raw = raw
@@ -288,20 +222,10 @@ def _ocr_with_retries(
                 "  Retry matched: %r → %s (strategy: %s)",
                 retry_raw, retry_cleaned, strat,
             )
-            return (retry_raw, _fuzzy_correct_with_prefix(retry_cleaned, prefix, codes))
+            return (retry_raw, retry_cleaned)
 
     # No strategy matched — return original attempt
     return (best_raw, None)
-
-
-def _clean_and_normalize(raw: str) -> str | None:
-    """Strip non-alphanumeric chars, uppercase, apply prefix/suffix fixes."""
-    cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
-    if not cleaned or len(cleaned) < 2:
-        return None
-    cleaned = _normalize_prefix(cleaned)
-    cleaned = _normalize_suffix(cleaned)
-    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -338,20 +262,19 @@ def _is_false_positive(text: str) -> bool:
 def recognize_fixtures(
     image: np.ndarray,
     ovals: list[dict],
-    known: list[str] | None = None,
+    *,
     prefix: str | None = None,
 ) -> list[dict]:
     """OCR all detected ovals and return fixture identifications.
 
     Every oval with readable alphanumeric text is captured as a fixture.
     OCR error corrections (prefix/suffix normalization) are always applied.
-    If *prefix* is provided it acts as an optional filter — only codes
-    starting with that prefix are kept.
+    If *prefix* is provided it acts as a filter — only codes starting with
+    that prefix are kept, with multi-strategy retries for better recall.
 
     Args:
         image: the page image (BGR or grayscale)
         ovals: list of oval detection dicts from find_ovals()
-        known: unused (kept for API compatibility).
         prefix: if set, only keep ovals whose corrected text starts with
                 this string (e.g. "LT").
 
@@ -396,76 +319,4 @@ def recognize_fixtures(
                 "fixture": cleaned,
             }
         )
-    return results
-
-
-def scan_page_for_codes(
-    image: np.ndarray,
-    known_codes: list[str],
-    threshold: int = FUZZY_THRESHOLD,
-) -> list[dict]:
-    """Full-page OCR: find all text on the page that matches known fixture codes.
-
-    Instead of detecting shapes first, this scans the entire page for text and
-    keeps only words that fuzzy-match a code from the legend. The legend drives
-    what counts as a fixture.
-
-    Args:
-        image: the full page image (BGR or grayscale)
-        known_codes: fixture codes extracted from the legend
-        threshold: minimum fuzz ratio to accept a match
-
-    Returns a list of dicts:
-        raw_text – the OCR'd word
-        fixture  – matched fixture code
-        x, y, w, h – bounding box of the word on the page
-    """
-    if len(image.shape) == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image
-
-    # Get word-level bounding boxes from Tesseract (PSM 6 = block of text)
-    data = pytesseract.image_to_data(
-        gray,
-        config="--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- ",
-        output_type=pytesseract.Output.DICT,
-    )
-
-    results: list[dict] = []
-    n_words = len(data["text"])
-
-    for i in range(n_words):
-        raw = data["text"][i].strip()
-        if not raw or len(raw) < 2:
-            continue
-
-        # Clean: strip non-alphanumeric, uppercase
-        cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
-        if not cleaned or len(cleaned) < 2:
-            continue
-
-        # Fuzzy-match against every known code
-        best_match = None
-        best_score = 0
-        for code in known_codes:
-            score = fuzz.ratio(cleaned, code)
-            if score > best_score:
-                best_score = score
-                best_match = code
-
-        if best_score >= threshold and best_match is not None:
-            results.append(
-                {
-                    "raw_text": raw,
-                    "fixture": best_match,
-                    "x": data["left"][i],
-                    "y": data["top"][i],
-                    "w": data["width"][i],
-                    "h": data["height"][i],
-                    "score": best_score,
-                }
-            )
-
-    logger.info("  Text search found %d code matches on page", len(results))
     return results
