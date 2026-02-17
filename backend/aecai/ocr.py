@@ -215,6 +215,21 @@ def _is_valid_prefix_match(text: str, prefix: str) -> bool:
     )
 
 
+def _has_text_content(crop: np.ndarray, dark_pct_range: tuple[float, float] = (0.05, 0.85)) -> bool:
+    """Quick check whether a crop contains text-like content.
+
+    A fixture oval crop should have SOME dark pixels (text) on a light
+    background — roughly 5-85% dark.  Empty white regions, solid black
+    blobs, and near-uniform crops are rejected without calling Tesseract.
+    """
+    if crop.size == 0:
+        return False
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    dark_fraction = 1.0 - np.count_nonzero(binary) / binary.size
+    return dark_pct_range[0] <= dark_fraction <= dark_pct_range[1]
+
+
 def _ocr_with_retries(
     image: np.ndarray,
     oval: dict,
@@ -225,16 +240,28 @@ def _ocr_with_retries(
     Returns (raw_text, cleaned_fixture_or_None).
     The first attempt uses default settings; subsequent attempts use
     _RETRY_STRATEGIES.  Stops as soon as a prefix match is found.
+    Skips OCR entirely for crops with no visible text content, and
+    skips retries when the first pass produced no alphanumeric text.
     """
     # First attempt: default crop + scale
     crop = crop_oval(image, oval)
     if crop.size == 0:
         return ("", None)
 
+    # Quick visual pre-check — skip Tesseract for empty/solid crops
+    if not _has_text_content(crop):
+        return ("", None)
+
     raw = ocr_crop(crop)
     cleaned = _clean_and_normalize(raw)
     if cleaned and _is_valid_prefix_match(cleaned, prefix):
         return (raw, cleaned)
+
+    # Only retry if first pass produced at least 2 alphanumeric chars —
+    # otherwise there's no text here and retries are wasted.
+    alpha_count = sum(1 for c in raw if c.isalnum())
+    if alpha_count < 2:
+        return (raw, None)
 
     # Retry with alternative strategies
     best_raw = raw
