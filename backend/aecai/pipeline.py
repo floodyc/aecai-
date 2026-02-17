@@ -17,6 +17,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
+import cv2
 import numpy as np
 from pdf2image import convert_from_path
 
