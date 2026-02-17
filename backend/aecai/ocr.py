@@ -149,13 +149,46 @@ def _normalize_suffix(text: str) -> str:
     return text
 
 
+def _normalize_digits(text: str) -> str:
+    """Fix OCR letter/digit confusion in the numeric portion of a code.
+
+    After the leading letter prefix, 'I' and 'l' should be '1',
+    and 'O' should be '0'.  E.g. "LTII" → "LT11", "LTO4" → "LT04".
+    """
+    # Find where the digit portion starts (first digit or misread digit)
+    m = re.match(r"^([A-Z]+)", text)
+    if not m:
+        return text
+    prefix_end = m.end()
+    prefix_part = text[:prefix_end]
+    digit_part = text[prefix_end:]
+
+    # In the digit portion, fix common OCR confusion
+    digit_part = digit_part.replace("I", "1").replace("O", "0")
+
+    return prefix_part + digit_part
+
+
+# Pattern for a valid fixture code: 1-3 letters, 1-3 digits, optional suffix letter
+_FIXTURE_CODE_RE = re.compile(r"^[A-Z]{1,3}\d{1,3}[A-Z]?$")
+
+
 def _clean_and_normalize(raw: str) -> str | None:
-    """Strip non-alphanumeric chars, uppercase, apply prefix/suffix fixes."""
+    """Strip non-alphanumeric chars, uppercase, normalize, and validate.
+
+    Returns None if the result doesn't look like a fixture code.
+    """
     cleaned = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
     if not cleaned or len(cleaned) < 2:
         return None
     cleaned = _normalize_prefix(cleaned)
+    cleaned = _normalize_digits(cleaned)
     cleaned = _normalize_suffix(cleaned)
+
+    # Only accept text that looks like a fixture code
+    if not _FIXTURE_CODE_RE.match(cleaned):
+        return None
+
     return cleaned
 
 
