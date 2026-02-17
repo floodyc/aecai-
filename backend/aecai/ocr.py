@@ -259,7 +259,11 @@ def recognize_fixtures(
         fixture = None
 
         if prefix:
-            # Prefix mode: accept text starting with the prefix
+            # Prefix mode: apply the same OCR error corrections as fuzzy mode,
+            # then check if text starts with the prefix.
+            # This catches common misreads: LTO4→LT04, L704→LT04, LT048→LT04B
+            cleaned = _normalize_prefix(cleaned)
+            cleaned = _normalize_suffix(cleaned)
             if cleaned.startswith(prefix.upper()):
                 fixture = cleaned
         else:
