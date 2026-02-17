@@ -49,10 +49,8 @@ def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_small, iterations=2)
 
     # Stage 2: merge text inside ovals into a solid blob
-    # 5x5 ellipse bridges gaps between characters and the oval wall
-    # without merging the oval with nearby drawing elements (dashed
-    # lines, junction-box circles, etc.)
-    k_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    # 7x7 ellipse bridges gaps between characters and the oval wall
+    k_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_large, iterations=1)
 
     return gray, binary
