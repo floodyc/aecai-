@@ -236,6 +236,28 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                             <span className="text-xs text-gray-500">
                               Skipped
                             </span>
+                          ) : info.detection_method === "template" ? (
+                            <span className="text-xs text-gray-400">
+                              <span
+                                className={
+                                  (info.template_matches ?? 0) === 0
+                                    ? "text-red-400 font-semibold"
+                                    : "text-primary-400"
+                                }
+                              >
+                                {info.template_matches ?? 0} shapes
+                              </span>
+                              {" → "}
+                              <span
+                                className={
+                                  (info.ocr_recognised ?? 0) === 0
+                                    ? "text-amber-400"
+                                    : "text-green-400"
+                                }
+                              >
+                                {info.ocr_recognised ?? 0} recognised
+                              </span>
+                            </span>
                           ) : (
                             <span className="text-xs text-gray-400">
                               <span
@@ -274,12 +296,29 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                             </div>
                           )}
                         {info.status !== "skipped" &&
+                          info.detection_method === "template" &&
+                          (info.template_matches ?? 0) === 0 && (
+                            <p className="text-xs text-red-400 mt-1">
+                              No shapes matched the template on this page.
+                            </p>
+                          )}
+                        {info.status !== "skipped" &&
+                          info.detection_method === "template" &&
+                          (info.template_matches ?? 0) > 0 &&
+                          (info.ocr_recognised ?? 0) === 0 && (
+                            <p className="text-xs text-amber-400 mt-1">
+                              Shapes found but OCR could not read fixture codes.
+                            </p>
+                          )}
+                        {info.status !== "skipped" &&
+                          info.detection_method !== "template" &&
                           (info.shapes_found ?? 0) === 0 && (
                             <p className="text-xs text-red-400 mt-1">
                               No ovals detected on this page.
                             </p>
                           )}
                         {info.status !== "skipped" &&
+                          info.detection_method !== "template" &&
                           (info.shapes_found ?? 0) > 0 &&
                           info.shapes_matched === 0 && (
                             <p className="text-xs text-amber-400 mt-1">

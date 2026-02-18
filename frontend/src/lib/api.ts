@@ -19,6 +19,7 @@ export interface PageDiagnostics {
   shapes_matched?: number;
   text_matches?: number;
   template_matches?: number;
+  ocr_recognised?: number;
   raw_ocr_samples?: string[];
 }
 

@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 # Scales to try when matching (symbols may vary slightly across pages)
 _SCALES = [0.8, 0.9, 1.0, 1.1, 1.2]
 
-# Lower threshold for edge matching (edges are sparser than grayscale)
-_MATCH_THRESHOLD = 0.40
+# Threshold for edge matching — 0.55 balances recall vs false positives.
+# At 0.40 we got 1916 matches on a single page (should be ~87).
+_MATCH_THRESHOLD = 0.55
 
 # IoU threshold for non-maximum suppression
 _NMS_IOU_THRESHOLD = 0.3

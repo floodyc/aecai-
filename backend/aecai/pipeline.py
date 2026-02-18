@@ -27,6 +27,7 @@ from .ocr import (
     _clean_and_normalize,
     _has_text_content,
     _is_false_positive,
+    _ocr_with_retries,
     crop_oval,
     ocr_crop,
     recognize_fixtures,
@@ -255,8 +256,17 @@ def run_takeoff(
 
     use_template_matching = len(templates) > 0
 
+    # Extract the letter prefix from exemplar labels (e.g. "LT" from "LT04").
+    # Used to validate OCR results on template-matched shapes.
+    tmpl_prefix = ""
+    if templates:
+        import re as _re
+        _m = _re.match(r"^[A-Z]+", templates[0]["code"].upper())
+        tmpl_prefix = _m.group() if _m else ""
+
     if use_template_matching:
-        logger.info("Using template matching (%d templates)", len(templates))
+        logger.info("Using template matching (%d templates, OCR prefix=%r)",
+                    len(templates), tmpl_prefix)
         diagnostics["legend_source"] = "exemplars"
         diagnostics["active_codes"] = list({t["code"] for t in templates})
     elif fixture_prefix:
@@ -312,27 +322,36 @@ def run_takeoff(
                         len(tmpl_detections), floor_name)
 
             # OCR each matched region to read the actual fixture code.
+            # Use prefix from exemplar labels to validate OCR and retry
+            # with multiple crop/scale strategies when needed.
             detections = []
             for td in tmpl_detections:
                 oval = {"x": td["x"], "y": td["y"],
                         "w": td["w"], "h": td["h"]}
-                crop = crop_oval(image, oval)
-                if crop.size == 0:
-                    continue
-                if not _has_text_content(crop):
-                    continue
 
-                raw = ocr_crop(crop)
-                if _is_false_positive(raw):
-                    detections.append({
-                        "oval": oval, "raw_text": raw, "fixture": None,
-                        "score": td["score"], "detection_method": "template",
-                    })
-                    continue
+                if tmpl_prefix:
+                    # Prefix-validated OCR with multi-strategy retries
+                    raw, fixture = _ocr_with_retries(image, oval, tmpl_prefix)
+                else:
+                    # No prefix — single-pass OCR
+                    crop = crop_oval(image, oval)
+                    if crop.size == 0:
+                        detections.append({
+                            "oval": oval, "raw_text": "", "fixture": None,
+                            "score": td["score"], "detection_method": "template",
+                        })
+                        continue
+                    if not _has_text_content(crop):
+                        detections.append({
+                            "oval": oval, "raw_text": "", "fixture": None,
+                            "score": td["score"], "detection_method": "template",
+                        })
+                        continue
+                    raw = ocr_crop(crop)
+                    fixture = _clean_and_normalize(raw) if not _is_false_positive(raw) else None
 
-                cleaned = _clean_and_normalize(raw)
                 detections.append({
-                    "oval": oval, "raw_text": raw, "fixture": cleaned,
+                    "oval": oval, "raw_text": raw, "fixture": fixture,
                     "score": td["score"], "detection_method": "template",
                 })
 
