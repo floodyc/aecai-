@@ -315,26 +315,50 @@ def run_takeoff(
 
         if use_template_matching:
             # ---- Template matching (user-provided exemplars) ----
-            # Edge-based matching finds all shapes that look like the
-            # exemplar oval, regardless of what text is inside.
+            # Two-pass approach:
+            #   Pass 1: edge matching at 150 DPI (low memory, shape detection)
+            #   Pass 2: re-render at 300 DPI for OCR (text needs resolution)
+
+            # Pass 1 — shape matching at 150 DPI
             tmpl_detections = match_templates_on_page(image, templates)
             logger.info("  Template matching: %d shape detections on %s",
                         len(tmpl_detections), floor_name)
 
-            # OCR each matched region to read the actual fixture code.
-            # Use prefix from exemplar labels to validate OCR and retry
-            # with multiple crop/scale strategies when needed.
+            # Free the 150 DPI image before rendering at 300 DPI
+            del image
+            gc.collect()
+
+            # Pass 2 — re-render at 300 DPI for OCR
+            image_hires = _render_single_page(pdf_path, page_num, dpi=DPI)
+            if image_hires is None:
+                logger.warning("  Could not re-render %s at %d DPI for OCR",
+                               floor_name, DPI)
+                diagnostics["pages"][floor_name] = {
+                    "status": "processed",
+                    "detection_method": "template",
+                    "template_matches": len(tmpl_detections),
+                    "ocr_recognised": 0,
+                }
+                page_results[floor_name] = []
+                continue
+
+            # Scale detection coordinates from 150 DPI → 300 DPI
+            dpi_scale = DPI / template_dpi
+
+            # OCR each matched region at 300 DPI
             detections = []
             for td in tmpl_detections:
-                oval = {"x": td["x"], "y": td["y"],
-                        "w": td["w"], "h": td["h"]}
+                oval = {
+                    "x": int(td["x"] * dpi_scale),
+                    "y": int(td["y"] * dpi_scale),
+                    "w": int(td["w"] * dpi_scale),
+                    "h": int(td["h"] * dpi_scale),
+                }
 
                 if tmpl_prefix:
-                    # Prefix-validated OCR with multi-strategy retries
-                    raw, fixture = _ocr_with_retries(image, oval, tmpl_prefix)
+                    raw, fixture = _ocr_with_retries(image_hires, oval, tmpl_prefix)
                 else:
-                    # No prefix — single-pass OCR
-                    crop = crop_oval(image, oval)
+                    crop = crop_oval(image_hires, oval)
                     if crop.size == 0:
                         detections.append({
                             "oval": oval, "raw_text": "", "fixture": None,
@@ -355,9 +379,13 @@ def run_takeoff(
                     "score": td["score"], "detection_method": "template",
                 })
 
+            # Free the 300 DPI image
+            del image_hires
+            gc.collect()
+
             recognised = [d for d in detections if d["fixture"] is not None]
-            logger.info("  OCR recognised %d/%d template matches",
-                        len(recognised), len(tmpl_detections))
+            logger.info("  OCR recognised %d/%d template matches at %d DPI",
+                        len(recognised), len(tmpl_detections), DPI)
 
             raw_samples = [d["raw_text"] for d in detections if d["raw_text"]][:15]
 
@@ -368,6 +396,11 @@ def run_takeoff(
                 "ocr_recognised": len(recognised),
                 "raw_ocr_samples": raw_samples,
             }
+
+            page_results[floor_name] = detections
+
+            # Already freed both images above; skip the del at end of loop
+            continue
         else:
             # ---- Oval detection + OCR (default pipeline) ----
             ovals = find_ovals(image)

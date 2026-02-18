@@ -202,7 +202,20 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
                 <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
                   Detection Method
                 </p>
-                {diagnostics.fixture_prefix ? (
+                {diagnostics.legend_source === "exemplars" ? (
+                  <p className="text-gray-300">
+                    Template matching with{" "}
+                    <span className="font-mono font-semibold text-primary-400">
+                      {diagnostics.templates_extracted ?? 0}
+                    </span>{" "}
+                    exemplar{(diagnostics.templates_extracted ?? 0) !== 1 ? "s" : ""}{" "}
+                    {diagnostics.active_codes?.length > 0 && (
+                      <span className="text-gray-400">
+                        ({diagnostics.active_codes.join(", ")})
+                      </span>
+                    )}
+                  </p>
+                ) : diagnostics.fixture_prefix ? (
                   <p className="text-gray-300">
                     All ovals captured, filtered by prefix:{" "}
                     <span className="font-mono font-semibold text-primary-400">
