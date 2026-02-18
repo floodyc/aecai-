@@ -230,25 +230,34 @@ def run_takeoff(
         "pages": {},
     }
 
-    # Extract exemplar templates (user-drawn bounding boxes)
+    # Extract exemplar templates (user-drawn bounding boxes).
+    # Templates are cropped at their source DPI (default 150) — NO upscaling
+    # to 300 DPI.  Processing pages are also rendered at the template DPI,
+    # so template matching runs at 150 DPI.  This uses 25% of the memory
+    # compared to 300 DPI (85 MB vs 340 MB per 113-megapixel page).
     templates: list[dict] = []
+    template_dpi: int = 150  # source DPI from the exemplar drawing canvas
     if exemplars:
         logger.info("Extracting %d exemplar templates...", len(exemplars))
-        templates = _extract_exemplar_templates(pdf_path, exemplars)
-        logger.info("Extracted %d templates", len(templates))
+        # Extract at source DPI — no scaling needed
+        template_dpi = exemplars[0].get("source_dpi", 150)
+        templates = _extract_exemplar_templates(pdf_path, exemplars, target_dpi=template_dpi)
+        logger.info("Extracted %d templates at %d DPI", len(templates), template_dpi)
         diagnostics["exemplars_provided"] = len(exemplars)
         diagnostics["templates_extracted"] = len(templates)
 
     use_template_matching = len(templates) > 0
 
-    # All ovals with alphanumeric text are captured.
-    # Prefix, if provided, acts as an optional filter.
-    if fixture_prefix:
-        logger.info("Fixture prefix filter: '%s'", fixture_prefix)
+    if use_template_matching:
+        logger.info("Using template matching (%d templates)", len(templates))
+        diagnostics["legend_source"] = "exemplars"
+        diagnostics["active_codes"] = list({t["code"] for t in templates})
+    elif fixture_prefix:
+        logger.info("Using oval detection with prefix filter: '%s'", fixture_prefix)
         diagnostics["legend_source"] = "prefix"
         diagnostics["active_codes"] = [f"{fixture_prefix}*"]
     else:
-        logger.info("No prefix filter — capturing all ovals with text")
+        logger.info("Using oval detection — capturing all ovals with text")
         diagnostics["legend_source"] = "all_ovals"
         diagnostics["active_codes"] = []
     # Build page number list — render one page at a time to stay under
@@ -279,8 +288,9 @@ def run_takeoff(
         if progress_callback:
             progress_callback(idx + 1, total_pages, f"Processing {floor_name}")
 
-        # Render just this page at 300 DPI (one at a time to limit memory)
-        image = _render_single_page(pdf_path, page_num, dpi=DPI)
+        # Render at 150 DPI for template matching (25% memory), 300 DPI for ovals
+        render_dpi = template_dpi if use_template_matching else DPI
+        image = _render_single_page(pdf_path, page_num, dpi=render_dpi)
         if image is None:
             logger.warning("Skipping %s — failed to render", floor_name)
             diagnostics["pages"][floor_name] = {"status": "render_failed"}
