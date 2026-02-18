@@ -360,6 +360,10 @@ def recognize_fixtures(
         if crop.size == 0:
             continue
 
+        # Skip Tesseract for crops with no visible text (empty/solid)
+        if not _has_text_content(crop):
+            continue
+
         raw = ocr_crop(crop)
 
         # Filter obvious noise

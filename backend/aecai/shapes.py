@@ -26,7 +26,7 @@ from .config import (
 logger = logging.getLogger(__name__)
 
 
-def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _binarize(image: np.ndarray) -> np.ndarray:
     """Convert to grayscale and produce a binary image for contour detection.
 
     Uses a two-stage morphological close:
@@ -34,6 +34,9 @@ def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     2. Larger kernel (7x7) to merge text glyphs INTO the oval boundary,
        turning a text-filled oval into a single solid blob whose contour
        is roughly elliptical.
+
+    The grayscale intermediate is freed immediately after thresholding
+    to reduce peak memory (saves ~113 MB for a 113-megapixel page).
     """
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -44,6 +47,9 @@ def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 8
     )
 
+    # Free grayscale — only binary is needed from here
+    del gray
+
     # Stage 1: close tiny gaps in contour lines
     k_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_small, iterations=2)
@@ -53,7 +59,7 @@ def _binarize(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     k_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, k_large, iterations=1)
 
-    return gray, binary
+    return binary
 
 
 def _ellipse_fit_ratio(cnt) -> float:
@@ -126,11 +132,15 @@ def find_ovals(
         area          – contour area
         ellipse_fit   – ratio of contour area to fitted ellipse area
     """
-    _, binary = _binarize(image)
+    binary = _binarize(image)
 
     # RETR_LIST finds ALL contours (not just outermost). Critical for floor
     # plans where small fixture ovals are nested inside room boundaries.
     contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Free binary image immediately — contours are now in memory as point
+    # arrays and the ~113 MB binary image is no longer needed.
+    del binary
 
     logger.info("  Total contours found: %d", len(contours))
 

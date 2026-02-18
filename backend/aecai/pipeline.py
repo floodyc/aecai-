@@ -12,6 +12,7 @@ Detection approach:
 
 from __future__ import annotations
 
+import gc
 import logging
 from collections import Counter
 from pathlib import Path
@@ -71,8 +72,18 @@ def _render_single_page(
 ) -> np.ndarray | None:
     """Render a single PDF page to a BGR OpenCV image.
 
+    Memory-optimised: frees the PIL image and intermediate RGB array
+    before returning, so peak usage is ~2× the final image size instead
+    of 3× (which matters for 113-million-pixel architectural drawings).
+
     Returns None if the page cannot be rendered.
     """
+    import PIL.Image
+    # Large architectural drawings at 300 DPI easily exceed PIL's default
+    # decompression bomb limit (89 megapixels).  These are legitimate
+    # engineering documents, not attacks.
+    PIL.Image.MAX_IMAGE_PIXELS = 250_000_000
+
     kwargs: dict[str, Any] = {
         "dpi": dpi,
         "first_page": page_num,
@@ -90,8 +101,14 @@ def _render_single_page(
     if not pil_images:
         return None
 
+    # Convert PIL→numpy→BGR with minimal concurrent copies.
+    # A 113M-pixel page is ~340 MB per copy, so keeping 3 copies
+    # simultaneously (PIL + RGB + BGR) = 1020 MB — too much.
     arr = np.array(pil_images[0])
+    del pil_images                    # free PIL image (~340 MB)
     bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    del arr                           # free RGB array (~340 MB)
+    # Now only bgr (~340 MB) is alive
     return bgr
 
 
@@ -158,9 +175,13 @@ def _extract_exemplar_templates(
             if len(crop.shape) == 3:
                 crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
-            templates.append({"code": ex["label"], "template": crop})
+            templates.append({"code": ex["label"], "template": crop.copy()})
             logger.info("Extracted exemplar template: %s (%dx%d from page %d)",
                         ex["label"], w, h, page_num)
+
+        # Free the full-page image before processing the next page
+        del img
+        gc.collect()
 
     return templates
 
@@ -309,8 +330,12 @@ def run_takeoff(
 
         page_results[floor_name] = detections
 
-        # Free the page image to keep memory bounded to 1 page at a time
+        # Free the page image and force garbage collection.  A single
+        # 113-megapixel page at 300 DPI is ~340 MB; OpenCV intermediates
+        # add another 200-300 MB.  Without explicit gc.collect() Python
+        # may not reclaim these before the next page renders.
         del image
+        gc.collect()
 
     # Aggregate counts
     floor_counts: dict[str, Counter] = {}
