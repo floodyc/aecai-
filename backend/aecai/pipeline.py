@@ -23,7 +23,14 @@ import numpy as np
 from pdf2image import convert_from_path
 
 from .config import DPI, POPPLER_PATH
-from .ocr import recognize_fixtures
+from .ocr import (
+    _clean_and_normalize,
+    _has_text_content,
+    _is_false_positive,
+    crop_oval,
+    ocr_crop,
+    recognize_fixtures,
+)
 from .report import build_results_json, generate_txt_report
 from .shapes import find_ovals
 from .symbol_match import match_templates_on_page
@@ -298,26 +305,49 @@ def run_takeoff(
 
         if use_template_matching:
             # ---- Template matching (user-provided exemplars) ----
+            # Edge-based matching finds all shapes that look like the
+            # exemplar oval, regardless of what text is inside.
             tmpl_detections = match_templates_on_page(image, templates)
-            logger.info("  Template matching: %d detections on %s",
+            logger.info("  Template matching: %d shape detections on %s",
                         len(tmpl_detections), floor_name)
 
-            # Convert template match results to the same format as OCR detections
+            # OCR each matched region to read the actual fixture code.
             detections = []
             for td in tmpl_detections:
+                oval = {"x": td["x"], "y": td["y"],
+                        "w": td["w"], "h": td["h"]}
+                crop = crop_oval(image, oval)
+                if crop.size == 0:
+                    continue
+                if not _has_text_content(crop):
+                    continue
+
+                raw = ocr_crop(crop)
+                if _is_false_positive(raw):
+                    detections.append({
+                        "oval": oval, "raw_text": raw, "fixture": None,
+                        "score": td["score"], "detection_method": "template",
+                    })
+                    continue
+
+                cleaned = _clean_and_normalize(raw)
                 detections.append({
-                    "oval": {"x": td["x"], "y": td["y"],
-                             "w": td["w"], "h": td["h"]},
-                    "raw_text": td["code"],
-                    "fixture": td["fixture"],
-                    "score": td["score"],
-                    "detection_method": "template",
+                    "oval": oval, "raw_text": raw, "fixture": cleaned,
+                    "score": td["score"], "detection_method": "template",
                 })
+
+            recognised = [d for d in detections if d["fixture"] is not None]
+            logger.info("  OCR recognised %d/%d template matches",
+                        len(recognised), len(tmpl_detections))
+
+            raw_samples = [d["raw_text"] for d in detections if d["raw_text"]][:15]
 
             diagnostics["pages"][floor_name] = {
                 "status": "processed",
                 "detection_method": "template",
                 "template_matches": len(tmpl_detections),
+                "ocr_recognised": len(recognised),
+                "raw_ocr_samples": raw_samples,
             }
         else:
             # ---- Oval detection + OCR (default pipeline) ----
