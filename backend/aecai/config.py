@@ -31,6 +31,13 @@ POPPLER_PATH = os.environ.get("POPPLER_PATH", POPPLER_PATH)
 
 DPI = int(os.environ.get("AECAI_DPI", "300"))
 
+# DPI for template matching pages.  Lower DPI uses less memory:
+#   150 DPI → ~85 MB/page (good for 2 GB deployments)
+#   300 DPI → ~340 MB/page (better OCR, needs ≥4 GB RAM)
+# Set to 0 or "auto" to match the main DPI setting.
+_tmpl_dpi_raw = os.environ.get("AECAI_TEMPLATE_DPI", "0")
+TEMPLATE_MATCH_DPI = DPI if _tmpl_dpi_raw in ("0", "auto", "") else int(_tmpl_dpi_raw)
+
 # ---------------------------------------------------------------------------
 # Oval detection parameters (calibrated – do not change)
 # ---------------------------------------------------------------------------

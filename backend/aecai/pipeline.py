@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 from pdf2image import convert_from_path
 
-from .config import DPI, POPPLER_PATH
+from .config import DPI, POPPLER_PATH, TEMPLATE_MATCH_DPI
 from .ocr import (
     _clean_and_normalize,
     _has_text_content,
@@ -239,20 +239,22 @@ def run_takeoff(
     }
 
     # Extract exemplar templates (user-drawn bounding boxes).
-    # Templates are cropped at their source DPI (default 150) — NO upscaling
-    # to 300 DPI.  Processing pages are also rendered at the template DPI,
-    # so template matching runs at 150 DPI.  This uses 25% of the memory
-    # compared to 300 DPI (85 MB vs 340 MB per 113-megapixel page).
+    # Templates are cropped at the configured TEMPLATE_MATCH_DPI.
+    # On low-RAM deployments (AECAI_TEMPLATE_DPI=150): ~85 MB/page,
+    # OCR compensates with 6-8x upscale.
+    # On local machines (default, matches DPI=300): ~340 MB/page,
+    # OCR uses standard 3x upscale for best accuracy.
     templates: list[dict] = []
-    template_dpi: int = 150  # source DPI from the exemplar drawing canvas
+    template_dpi: int = TEMPLATE_MATCH_DPI
     if exemplars:
         logger.info("Extracting %d exemplar templates...", len(exemplars))
-        # Extract at source DPI — no scaling needed
-        template_dpi = exemplars[0].get("source_dpi", 150)
+        source_dpi = exemplars[0].get("source_dpi", 150)
         templates = _extract_exemplar_templates(pdf_path, exemplars, target_dpi=template_dpi)
-        logger.info("Extracted %d templates at %d DPI", len(templates), template_dpi)
+        logger.info("Extracted %d templates at %d DPI (source %d DPI)",
+                    len(templates), template_dpi, source_dpi)
         diagnostics["exemplars_provided"] = len(exemplars)
         diagnostics["templates_extracted"] = len(templates)
+        diagnostics["template_dpi"] = template_dpi
 
     use_template_matching = len(templates) > 0
 
@@ -325,15 +327,27 @@ def run_takeoff(
 
             # OCR each matched region.  Template bounding boxes already
             # include some padding from the user's drawn box, so we use
-            # tighter margins than oval contour detection.  Higher upscale
-            # (6-8x) compensates for 150 DPI resolution.
-            _TMPL_OCR_STRATEGIES = [
-                {"margin_h": 0.05, "margin_v": 0.08, "scale": 6},  # tight crop, high scale
-                {"margin_h": 0.10, "margin_v": 0.12, "scale": 8},  # moderate crop, very high scale
-                {"margin_h": 0.02, "margin_v": 0.04, "scale": 6},  # very tight crop
-                {"margin_h": 0.15, "margin_v": 0.18, "scale": 7},  # wider crop (like oval default)
-                {"margin_h": 0.00, "margin_v": 0.00, "scale": 8},  # no margin — full bbox
-            ]
+            # tighter margins than oval contour detection.
+            # At lower DPI we compensate with higher upscale factors.
+            is_low_dpi = template_dpi < DPI
+            if is_low_dpi:
+                # 150 DPI: need 6-8x upscale to reach ~900 effective DPI
+                _TMPL_OCR_STRATEGIES = [
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 6},
+                    {"margin_h": 0.10, "margin_v": 0.12, "scale": 8},
+                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 6},
+                    {"margin_h": 0.15, "margin_v": 0.18, "scale": 7},
+                    {"margin_h": 0.00, "margin_v": 0.00, "scale": 8},
+                ]
+            else:
+                # Full DPI (300): standard 3-5x upscale
+                _TMPL_OCR_STRATEGIES = [
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 3},
+                    {"margin_h": 0.10, "margin_v": 0.15, "scale": 4},
+                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 3},
+                    {"margin_h": 0.15, "margin_v": 0.20, "scale": 5},
+                    {"margin_h": 0.00, "margin_v": 0.00, "scale": 4},
+                ]
 
             detections = []
             for td in tmpl_detections:
