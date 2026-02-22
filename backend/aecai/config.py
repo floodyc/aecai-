@@ -15,7 +15,7 @@ import shutil
 
 if platform.system() == "Windows":
     TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    POPPLER_PATH = r"C:\poppler\Library\bin"
+    POPPLER_PATH = r"C:\Users\flood\Desktop\Apps\poppler-24.08.0\Library\bin"
 else:
     # Linux / Docker – Tesseract and Poppler installed via apt
     TESSERACT_CMD = shutil.which("tesseract") or "/usr/bin/tesseract"
