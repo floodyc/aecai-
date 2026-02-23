@@ -16,6 +16,8 @@ import cv2
 import numpy as np
 import pytesseract
 
+from thefuzz import fuzz
+
 from .config import (
     CROP_MARGIN_H,
     CROP_MARGIN_V,
@@ -228,6 +230,8 @@ _PREFIX_FIXES = {
     "IT":  "LT",     # L misread as I
     "1T":  "LT",     # L misread as 1
     "L1":  "LT",     # T misread as 1 (when followed by digits)
+    "71":  "LT",     # L misread as 7, T misread as 1
+    "7T":  "LT",     # L misread as 7
 }
 
 # Common OCR suffix misreads
@@ -293,10 +297,22 @@ def _clean_and_normalize(raw: str) -> str | None:
     cleaned = _normalize_suffix(cleaned)
 
     # Only accept text that looks like a fixture code
-    if not _FIXTURE_CODE_RE.match(cleaned):
-        return None
+    if _FIXTURE_CODE_RE.match(cleaned):
+        return cleaned
 
-    return cleaned
+    # Strip 1-2 leading noise characters and retry normalization.
+    # OCR often prepends border artifacts: "CLT11" → "LT11", "GLT04" → "LT04"
+    for offset in range(1, min(3, len(cleaned) - 1)):
+        candidate = cleaned[offset:]
+        if len(candidate) < 3:
+            break
+        candidate = _normalize_prefix(candidate)
+        candidate = _normalize_digits(candidate)
+        candidate = _normalize_suffix(candidate)
+        if _FIXTURE_CODE_RE.match(candidate):
+            return candidate
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +338,7 @@ def _is_valid_prefix_match(text: str, prefix: str) -> bool:
     )
 
 
-def _has_text_content(crop: np.ndarray, dark_pct_range: tuple[float, float] = (0.05, 0.85)) -> bool:
+def _has_text_content(crop: np.ndarray, dark_pct_range: tuple[float, float] = (0.02, 0.90)) -> bool:
     """Quick check whether a crop contains text-like content.
 
     A fixture oval crop should have SOME dark pixels (text) on a light
@@ -423,6 +439,47 @@ def _is_false_positive(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Fuzzy matching against known fixture codes
+# ---------------------------------------------------------------------------
+
+_FUZZY_THRESHOLD = 70  # minimum fuzz ratio to accept a match
+
+
+def _fuzzy_match(text: str, known_codes: list[str]) -> str | None:
+    """Try to fuzzy-match OCR text against a list of known fixture codes.
+
+    Returns the best matching code if the score meets the threshold,
+    otherwise None.
+    """
+    if not text or not known_codes:
+        return None
+
+    best_score = 0
+    best_code = None
+    for code in known_codes:
+        score = fuzz.ratio(text.upper(), code.upper())
+        if score > best_score:
+            best_score = score
+            best_code = code
+
+    if best_score >= _FUZZY_THRESHOLD and best_code:
+        logger.debug("Fuzzy matched %r → %s (score=%d)", text, best_code, best_score)
+        return best_code
+
+    return None
+
+
+# Retry strategies for the no-prefix path (same idea as _RETRY_STRATEGIES
+# but also includes adaptive preprocessing variants).
+_NOPREFIX_RETRY_STRATEGIES = [
+    {"margin_h": 0.10, "margin_v": 0.15, "scale": 4},
+    {"margin_h": 0.05, "margin_v": 0.10, "scale": 4},
+    {"margin_h": 0.05, "margin_v": 0.10, "scale": 4, "adaptive": True},
+    {"margin_h": 0.20, "margin_v": 0.25, "scale": 5},
+]
+
+
+# ---------------------------------------------------------------------------
 # Main recognition
 # ---------------------------------------------------------------------------
 
@@ -431,6 +488,7 @@ def recognize_fixtures(
     ovals: list[dict],
     *,
     prefix: str | None = None,
+    known_codes: list[str] | None = None,
 ) -> list[dict]:
     """OCR all detected ovals and return fixture identifications.
 
@@ -444,6 +502,8 @@ def recognize_fixtures(
         ovals: list of oval detection dicts from find_ovals()
         prefix: if set, only keep ovals whose corrected text starts with
                 this string (e.g. "LT").
+        known_codes: optional list of known fixture codes for fuzzy matching
+                     (e.g. from legend parsing).
 
     Returns a list of dicts:
         oval     – original oval dict
@@ -459,35 +519,58 @@ def recognize_fixtures(
             raw, fixture = _ocr_with_retries(image, oval, upper_prefix)
             if _is_false_positive(raw):
                 fixture = None
+            # Fuzzy match fallback
+            if not fixture and known_codes and raw:
+                fixture = _fuzzy_match(raw, known_codes)
             results.append({"oval": oval, "raw_text": raw, "fixture": fixture})
             continue
 
-        # No prefix — single-pass OCR, capture everything
+        # No prefix — multi-strategy OCR with retries
         crop = crop_oval(image, oval)
         if crop.size == 0:
             continue
 
-        # Skip Tesseract for crops with no visible text (empty/solid)
         if not _has_text_content(crop):
             continue
 
         raw = ocr_crop(crop)
 
-        # Filter obvious noise
         if _is_false_positive(raw):
             results.append({"oval": oval, "raw_text": raw, "fixture": None})
             continue
 
         cleaned = _clean_and_normalize(raw)
-        if not cleaned:
-            results.append({"oval": oval, "raw_text": raw, "fixture": None})
+        if cleaned:
+            results.append({"oval": oval, "raw_text": raw, "fixture": cleaned})
             continue
 
-        results.append(
-            {
-                "oval": oval,
-                "raw_text": raw,
-                "fixture": cleaned,
-            }
-        )
+        # First pass failed — retry with alternative strategies
+        alpha_count = sum(1 for c in raw if c.isalnum())
+        best_raw = raw
+        fixture = None
+
+        if alpha_count >= 2:
+            for strat in _NOPREFIX_RETRY_STRATEGIES:
+                retry_crop = crop_oval(
+                    image, oval,
+                    margin_h=strat["margin_h"],
+                    margin_v=strat["margin_v"],
+                )
+                if retry_crop.size == 0:
+                    continue
+                if strat.get("adaptive"):
+                    retry_raw = ocr_crop_adaptive(retry_crop, scale=strat["scale"])
+                else:
+                    retry_raw = ocr_crop(retry_crop, scale=strat["scale"])
+                retry_cleaned = _clean_and_normalize(retry_raw)
+                if retry_cleaned:
+                    best_raw = retry_raw
+                    fixture = retry_cleaned
+                    break
+
+        # Fuzzy match fallback
+        if not fixture and known_codes and best_raw:
+            fixture = _fuzzy_match(best_raw, known_codes)
+
+        results.append({"oval": oval, "raw_text": best_raw, "fixture": fixture})
     return results

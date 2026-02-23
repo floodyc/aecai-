@@ -326,6 +326,10 @@ async def start_takeoff(request: Request):
     if parsed_fixture_prefix == "":
         parsed_fixture_prefix = None
 
+    # YOLO detection toggle
+    use_yolo_raw = form.get("use_yolo")
+    parsed_use_yolo = str(use_yolo_raw).lower() in ("true", "1", "yes") if use_yolo_raw else False
+
     # Parse exemplar bounding boxes — user-drawn symbol selections
     # Format: [{label, page, x, y, w, h, source_dpi}]
     parsed_exemplars: list[dict] | None = None
@@ -345,6 +349,7 @@ async def start_takeoff(request: Request):
         legend_image_path=legend_image_path,
         fixture_prefix=parsed_fixture_prefix,
         exemplars=parsed_exemplars,
+        use_yolo=parsed_use_yolo,
     )
 
     return _job_to_response(job)
@@ -375,6 +380,112 @@ async def download_report(job_id: str):
         media_type="text/plain",
         headers={"Content-Disposition": f"attachment; filename=aecai_report_{job_id}.txt"},
     )
+
+
+# ---------------------------------------------------------------------------
+# YOLO training endpoints
+# ---------------------------------------------------------------------------
+
+
+class YoloStatusResponse(BaseModel):
+    model_available: bool
+    model_path: str
+
+
+class YoloTrainResponse(BaseModel):
+    status: str
+    message: str
+
+
+@router.get("/yolo/status", response_model=YoloStatusResponse)
+async def yolo_status():
+    """Check whether a trained YOLO model is available."""
+    from aecai.yolo_detect import is_model_available, _DEFAULT_MODEL
+    return YoloStatusResponse(
+        model_available=is_model_available(),
+        model_path=str(_DEFAULT_MODEL),
+    )
+
+
+@router.post("/yolo/train", response_model=YoloTrainResponse)
+async def yolo_train(request: Request):
+    """Train/fine-tune a YOLO model from annotations.
+
+    Accepts: preview_id (PDF reference), annotations (JSON array of
+    {page, x, y, w, h, source_dpi, label}), epochs (int, default 50).
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    form = await request.form()
+    preview_id = form.get("preview_id")
+    annotations_raw = form.get("annotations")
+    epochs_raw = form.get("epochs")
+
+    if not preview_id or str(preview_id) not in _preview_files:
+        raise HTTPException(status_code=400, detail="Valid preview_id required")
+    if not annotations_raw:
+        raise HTTPException(status_code=400, detail="annotations required")
+
+    pdf_path = _preview_files.get(str(preview_id))
+    epochs = int(str(epochs_raw)) if epochs_raw else 50
+
+    try:
+        annotations = json.loads(str(annotations_raw))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid annotations JSON")
+
+    if len(annotations) < 1:
+        raise HTTPException(status_code=400, detail="At least 1 annotation required")
+
+    _log.info("Starting YOLO training: %d annotations, %d epochs", len(annotations), epochs)
+
+    # Run training in background thread
+    import threading
+    from aecai.yolo_detect import prepare_training_data, train_model
+
+    def _train():
+        try:
+            dataset_yaml = prepare_training_data(pdf_path, annotations)
+            train_model(dataset_yaml, epochs=epochs)
+            _log.info("YOLO training complete")
+        except Exception as e:
+            _log.error("YOLO training failed: %s", e)
+
+    thread = threading.Thread(target=_train, daemon=True)
+    thread.start()
+
+    return YoloTrainResponse(
+        status="training_started",
+        message=f"Training started with {len(annotations)} annotations for {epochs} epochs",
+    )
+
+
+@router.post("/yolo/auto-annotate")
+async def yolo_auto_annotate(request: Request):
+    """Generate training annotations using existing oval detection.
+
+    Accepts: preview_id, pages (JSON array of page numbers).
+    Returns the auto-generated annotations.
+    """
+    form = await request.form()
+    preview_id = form.get("preview_id")
+    pages_raw = form.get("pages")
+
+    if not preview_id or str(preview_id) not in _preview_files:
+        raise HTTPException(status_code=400, detail="Valid preview_id required")
+
+    pdf_path = _preview_files.get(str(preview_id))
+
+    try:
+        page_numbers = json.loads(str(pages_raw)) if pages_raw else [1]
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid pages JSON")
+
+    from aecai.yolo_detect import generate_annotations_from_ovals
+    annotations = generate_annotations_from_ovals(pdf_path, page_numbers)
+
+    return {"annotations": annotations, "count": len(annotations)}
 
 
 # ---------------------------------------------------------------------------

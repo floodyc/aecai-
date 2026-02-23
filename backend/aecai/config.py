@@ -29,7 +29,7 @@ POPPLER_PATH = os.environ.get("POPPLER_PATH", POPPLER_PATH)
 # PDF rendering
 # ---------------------------------------------------------------------------
 
-DPI = int(os.environ.get("AECAI_DPI", "300"))
+DPI = int(os.environ.get("AECAI_DPI", "600"))
 
 # DPI for template matching pages.  Lower DPI uses less memory:
 #   150 DPI → ~85 MB/page (good for 2 GB deployments)

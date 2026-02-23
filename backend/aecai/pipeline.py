@@ -37,6 +37,7 @@ from .ocr import (
 from .report import build_results_json, generate_txt_report
 from .shapes import find_ovals
 from .symbol_match import match_templates_on_page
+from .yolo_detect import detect_fixtures as yolo_detect, is_model_available
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,8 @@ def run_takeoff(
     fixture_prefix: str | None = None,
     exemplars: list[dict] | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    use_yolo: bool = False,
+    yolo_model_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run the full takeoff pipeline on a PDF.
 
@@ -282,7 +285,16 @@ def run_takeoff(
         _m = _re.match(r"^[A-Z]+", templates[0]["code"].upper())
         tmpl_prefix = _m.group() if _m else ""
 
-    if use_template_matching:
+    # Check for YOLO model availability
+    use_yolo_detection = use_yolo and is_model_available(yolo_model_path)
+    if use_yolo and not use_yolo_detection:
+        logger.warning("YOLO requested but no trained model found — falling back")
+
+    if use_yolo_detection:
+        logger.info("Using YOLO detection (model: %s)", yolo_model_path or "default")
+        diagnostics["legend_source"] = "yolo"
+        diagnostics["active_codes"] = []
+    elif use_template_matching:
         logger.info("Using template matching (%d templates, OCR prefix=%r)",
                     len(templates), tmpl_prefix)
         diagnostics["legend_source"] = "exemplars"
@@ -331,7 +343,56 @@ def run_takeoff(
             diagnostics["pages"][floor_name] = {"status": "render_failed"}
             continue
 
-        if use_template_matching:
+        if use_yolo_detection:
+            # ---- YOLO detection ----
+            yolo_dets = yolo_detect(image, model_path=yolo_model_path)
+            logger.info("  YOLO: %d detections on %s", len(yolo_dets), floor_name)
+
+            # OCR each YOLO detection using multi-strategy retries
+            detections = []
+            for yd in yolo_dets:
+                oval = {"x": yd["x"], "y": yd["y"],
+                        "w": yd["w"], "h": yd["h"]}
+                best_raw = ""
+                fixture = None
+
+                if fixture_prefix:
+                    best_raw, fixture = _ocr_with_retries(
+                        image, oval, fixture_prefix.upper()
+                    )
+                else:
+                    crop = crop_oval(image, oval, margin_h=0.05, margin_v=0.08)
+                    if crop.size > 0 and _has_text_content(crop):
+                        best_raw = ocr_crop(crop, scale=4)
+                        fixture = _clean_and_normalize(best_raw)
+                        if not fixture:
+                            # Adaptive fallback
+                            alt = ocr_crop_adaptive(crop, scale=4)
+                            alt_fix = _clean_and_normalize(alt)
+                            if alt_fix:
+                                best_raw = alt
+                                fixture = alt_fix
+
+                detections.append({
+                    "oval": oval, "raw_text": best_raw,
+                    "fixture": fixture,
+                    "confidence": yd["confidence"],
+                    "detection_method": "yolo",
+                })
+
+            recognised = [d for d in detections if d["fixture"] is not None]
+            logger.info("  YOLO OCR recognised %d/%d", len(recognised), len(yolo_dets))
+
+            raw_samples = [d["raw_text"] for d in detections if d["raw_text"]][:15]
+            diagnostics["pages"][floor_name] = {
+                "status": "processed",
+                "detection_method": "yolo",
+                "yolo_detections": len(yolo_dets),
+                "ocr_recognised": len(recognised),
+                "raw_ocr_samples": raw_samples,
+            }
+
+        elif use_template_matching:
             # ---- Template matching (user-provided exemplars) ----
             # Single-pass at 150 DPI: match shapes, then OCR each match
             # from the SAME image using tighter crops + higher upscale.

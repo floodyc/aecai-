@@ -6,5 +6,6 @@ numpy>=1.26
 pytesseract==0.3.13
 pdf2image==1.17.0
 thefuzz[speedup]==0.22.1
+ultralytics>=8.0
 Pillow>=10.0
 pydantic>=2.0,<3.0
