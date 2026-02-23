@@ -93,74 +93,90 @@ export default function ResultsView({ jobId, results }: ResultsViewProps) {
         </div>
       </div>
 
-      {/* Per-Floor Fixture Cards */}
+      {/* Fixture Count Table */}
       <div className="space-y-4">
         <h3 className="font-semibold text-gray-100">Fixture Count by Floor</h3>
 
-        {floorNames.map((floor) => {
-          const counts = floors[floor];
-          const rowTotal = Object.values(counts).reduce((a, b) => a + b, 0);
-          return (
-            <div
-              key={floor}
-              className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden"
-            >
-              <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
-                <span className="font-medium text-gray-200">{floor}</span>
-                <span className="text-sm font-semibold text-primary-400 tabular-nums">
-                  {rowTotal} fixtures
-                </span>
-              </div>
-              <div className="px-5 py-3">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-2">
-                  {types.map((t) => {
-                    const count = counts[t] || 0;
-                    if (count === 0) return null;
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800">
+                  <th className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wider font-medium sticky left-0 bg-gray-900 z-10">
+                    Type
+                  </th>
+                  {floorNames.map((floor) => (
+                    <th
+                      key={floor}
+                      className="text-right px-4 py-3 text-xs text-gray-500 uppercase tracking-wider font-medium whitespace-nowrap"
+                    >
+                      {floor}
+                    </th>
+                  ))}
+                  <th className="text-right px-4 py-3 text-xs text-primary-400 uppercase tracking-wider font-semibold">
+                    Total
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {types.map((t) => {
+                  const total = building_totals[t] || 0;
+                  if (total === 0) return null;
+                  return (
+                    <tr
+                      key={t}
+                      className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+                    >
+                      <td className="px-4 py-2.5 font-mono text-gray-200 font-medium sticky left-0 bg-gray-900 z-10">
+                        {t}
+                      </td>
+                      {floorNames.map((floor) => {
+                        const count = floors[floor][t] || 0;
+                        return (
+                          <td
+                            key={floor}
+                            className={`text-right px-4 py-2.5 tabular-nums ${
+                              count > 0
+                                ? "text-gray-100"
+                                : "text-gray-700"
+                            }`}
+                          >
+                            {count > 0 ? count : "\u2014"}
+                          </td>
+                        );
+                      })}
+                      <td className="text-right px-4 py-2.5 tabular-nums font-semibold text-primary-400">
+                        {total}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="bg-primary-950/30 border-t-2 border-primary-800">
+                  <td className="px-4 py-3 font-bold text-primary-300 sticky left-0 bg-primary-950/30 z-10">
+                    Building Total
+                  </td>
+                  {floorNames.map((floor) => {
+                    const floorTotal = Object.values(floors[floor]).reduce(
+                      (a, b) => a + b,
+                      0
+                    );
                     return (
-                      <div
-                        key={t}
-                        className="flex items-center justify-between"
+                      <td
+                        key={floor}
+                        className="text-right px-4 py-3 tabular-nums font-semibold text-primary-200"
                       >
-                        <span className="text-sm text-gray-400 font-mono">
-                          {t}
-                        </span>
-                        <span className="text-sm font-semibold text-gray-100 tabular-nums ml-3">
-                          {count}
-                        </span>
-                      </div>
+                        {floorTotal}
+                      </td>
                     );
                   })}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Building Total Card */}
-        <div className="bg-primary-950/30 border-2 border-primary-800 rounded-xl overflow-hidden">
-          <div className="px-5 py-3 border-b border-primary-800 flex items-center justify-between">
-            <span className="font-bold text-primary-300">Building Total</span>
-            <span className="text-sm font-bold text-primary-200 tabular-nums">
-              {summary.total_fixtures.toLocaleString()} fixtures
-            </span>
-          </div>
-          <div className="px-5 py-3">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-2">
-              {types.map((t) => {
-                const count = building_totals[t] || 0;
-                if (count === 0) return null;
-                return (
-                  <div key={t} className="flex items-center justify-between">
-                    <span className="text-sm text-primary-400 font-mono">
-                      {t}
-                    </span>
-                    <span className="text-sm font-bold text-primary-200 tabular-nums ml-3">
-                      {count}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+                  <td className="text-right px-4 py-3 tabular-nums font-bold text-primary-300">
+                    {summary.total_fixtures.toLocaleString()}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </div>
       </div>
