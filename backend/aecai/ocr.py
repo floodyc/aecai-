@@ -198,19 +198,42 @@ def ocr_crop(crop: np.ndarray, scale: int = 3, psm: int = 8) -> str:
              8 = single word (default), 7 = single line, 13 = raw line
 
     Whitelist restricts to A-Z 0-9.
-    If PSM 8 produces a very short result (< 3 alphanumeric chars),
+
+    Tries adaptive preprocessing first (CLAHE + adaptive threshold) which
+    handles oval border bleed much better than Otsu — avoids garbled reads
+    like "GD" when the border merges with text.  Falls back to Otsu if
+    adaptive produces fewer than 3 alphanumeric characters.
+
+    If PSM 8 still produces a very short result (< 3 alphanumeric chars),
     automatically retries with PSM 7 (single text line) which works
     better on some Tesseract installations (especially Windows 5.x).
     """
-    processed = preprocess_for_ocr(crop, scale=scale)
     whitelist = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-    text = pytesseract.image_to_string(processed, config=f"--psm {psm} {whitelist}").strip()
+    # Try adaptive preprocessing first — handles oval border bleed that
+    # causes Otsu to merge text with borders (producing "GD", "G0D", etc.)
+    processed_adap = preprocess_adaptive(crop, scale=scale)
+    text = pytesseract.image_to_string(
+        processed_adap, config=f"--psm {psm} {whitelist}"
+    ).strip()
+    alpha_count = sum(1 for c in text if c.isalnum())
+
+    # Fallback to Otsu if adaptive produced a poor result
+    if alpha_count < 3:
+        processed_otsu = preprocess_for_ocr(crop, scale=scale)
+        text_otsu = pytesseract.image_to_string(
+            processed_otsu, config=f"--psm {psm} {whitelist}"
+        ).strip()
+        otsu_alpha = sum(1 for c in text_otsu if c.isalnum())
+        if otsu_alpha > alpha_count:
+            text = text_otsu
+            alpha_count = otsu_alpha
 
     # Auto-retry with PSM 7 if PSM 8 produced a short/garbled result
-    alpha_count = sum(1 for c in text if c.isalnum())
     if psm == 8 and alpha_count < 3:
-        alt = pytesseract.image_to_string(processed, config=f"--psm 7 {whitelist}").strip()
+        alt = pytesseract.image_to_string(
+            processed_adap, config=f"--psm 7 {whitelist}"
+        ).strip()
         alt_alpha = sum(1 for c in alt if c.isalnum())
         if alt_alpha > alpha_count:
             logger.debug("PSM 7 improved OCR: %r → %r", text, alt)
@@ -472,9 +495,10 @@ def _fuzzy_match(text: str, known_codes: list[str]) -> str | None:
 # Retry strategies for the no-prefix path (same idea as _RETRY_STRATEGIES
 # but also includes adaptive preprocessing variants).
 _NOPREFIX_RETRY_STRATEGIES = [
+    {"margin_h": 0.10, "margin_v": 0.15, "scale": 4, "adaptive": True},
+    {"margin_h": 0.05, "margin_v": 0.10, "scale": 4, "adaptive": True},
     {"margin_h": 0.10, "margin_v": 0.15, "scale": 4},
     {"margin_h": 0.05, "margin_v": 0.10, "scale": 4},
-    {"margin_h": 0.05, "margin_v": 0.10, "scale": 4, "adaptive": True},
     {"margin_h": 0.20, "margin_v": 0.25, "scale": 5},
 ]
 

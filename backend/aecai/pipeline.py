@@ -409,27 +409,32 @@ def run_takeoff(
             is_low_dpi = template_dpi < DPI
             if is_low_dpi:
                 # 150 DPI: need 6-8x upscale to reach ~900 effective DPI
+                # Adaptive preprocessing first — avoids Otsu border-merge
+                # that produces garbled reads ("GD", "G0D") on these drawings.
                 _TMPL_OCR_STRATEGIES = [
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 6, "adaptive": True},
+                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 6, "adaptive": True},
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 8, "adaptive": True, "psm": 7},
                     {"margin_h": 0.05, "margin_v": 0.08, "scale": 6},
                     {"margin_h": 0.05, "margin_v": 0.08, "scale": 6, "psm": 7},
                     {"margin_h": 0.10, "margin_v": 0.12, "scale": 8},
-                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 6, "adaptive": True},
                     {"margin_h": 0.15, "margin_v": 0.18, "scale": 7},
                     {"margin_h": 0.00, "margin_v": 0.00, "scale": 8, "psm": 7},
-                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 8, "adaptive": True, "psm": 7},
                 ]
             else:
-                # Full DPI (300): standard 3-5x upscale
-                # Includes PSM 7 and adaptive preprocessing variants
-                # to handle Windows Tesseract 5.x quirks.
+                # Full DPI (300+): standard 3-5x upscale
+                # Adaptive preprocessing first — avoids Otsu border-merge
+                # that produces garbled reads ("GD", "G0D") on these drawings.
+                # Includes PSM 7 variants for Windows Tesseract 5.x quirks.
                 _TMPL_OCR_STRATEGIES = [
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 3, "adaptive": True},
+                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 3, "adaptive": True},
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 4, "adaptive": True, "psm": 7},
                     {"margin_h": 0.05, "margin_v": 0.08, "scale": 3},
                     {"margin_h": 0.05, "margin_v": 0.08, "scale": 3, "psm": 7},
                     {"margin_h": 0.10, "margin_v": 0.15, "scale": 4},
-                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 3, "adaptive": True},
                     {"margin_h": 0.15, "margin_v": 0.20, "scale": 5},
                     {"margin_h": 0.00, "margin_v": 0.00, "scale": 4, "psm": 7},
-                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 4, "adaptive": True, "psm": 7},
                 ]
 
             detections = []
