@@ -162,9 +162,17 @@ def match_templates_on_page(
         # Convert template to edges
         tmpl_edges = _to_edges(template)
 
+        # Match original orientation
         detections = match_single_template(page_edges, tmpl_edges, threshold)
         logger.info("    Template %s: %d edge matches", label, len(detections))
         all_detections.extend(detections)
+
+        # Match 90°-rotated orientation — fixture ovals on floor plans
+        # can be horizontal or vertical depending on wall orientation
+        rotated_edges = cv2.rotate(tmpl_edges, cv2.ROTATE_90_CLOCKWISE)
+        rot_detections = match_single_template(page_edges, rotated_edges, threshold)
+        logger.info("    Template %s (90°): %d edge matches", label, len(rot_detections))
+        all_detections.extend(rot_detections)
 
     # NMS across all templates (different orientations of the same symbol
     # will produce overlapping detections — keep the best one)
