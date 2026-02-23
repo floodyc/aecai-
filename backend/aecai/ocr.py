@@ -8,7 +8,9 @@ prefix normalization and suffix fixes.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import tempfile
 
 import cv2
 import numpy as np
@@ -20,8 +22,53 @@ from .config import (
     TESSERACT_CMD,
 )
 
+# Debug crop saving — set AECAI_DEBUG_CROPS=1 to save OCR crop images
+_DEBUG_CROPS = os.environ.get("AECAI_DEBUG_CROPS", "0") == "1"
+_DEBUG_CROP_DIR: str | None = None
+
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 logger = logging.getLogger(__name__)
+
+# Log Tesseract version on module load — helps diagnose OCR issues
+try:
+    _tess_version = pytesseract.get_tesseract_version()
+    logger.info("Tesseract version: %s (cmd: %s)", _tess_version, TESSERACT_CMD)
+except Exception as _e:
+    logger.warning("Could not detect Tesseract version: %s", _e)
+
+
+def _init_debug_crop_dir() -> str:
+    """Create a temp directory for debug crop images."""
+    global _DEBUG_CROP_DIR
+    if _DEBUG_CROP_DIR is None:
+        _DEBUG_CROP_DIR = tempfile.mkdtemp(prefix="aecai_crops_")
+        logger.info("Debug crop images will be saved to: %s", _DEBUG_CROP_DIR)
+    return _DEBUG_CROP_DIR
+
+
+def save_debug_crop(
+    crop: np.ndarray,
+    processed: np.ndarray | None,
+    label: str,
+    raw_text: str,
+) -> None:
+    """Save a crop image to the debug directory for inspection.
+
+    Only active when AECAI_DEBUG_CROPS=1.
+    Saves the raw crop and the preprocessed version side by side.
+    """
+    if not _DEBUG_CROPS:
+        return
+    crop_dir = _init_debug_crop_dir()
+    safe_label = re.sub(r"[^A-Za-z0-9_-]", "_", label)
+    safe_text = re.sub(r"[^A-Za-z0-9_-]", "_", raw_text) if raw_text else "empty"
+
+    path = os.path.join(crop_dir, f"{safe_label}_raw_{safe_text}.png")
+    cv2.imwrite(path, crop)
+
+    if processed is not None:
+        path_proc = os.path.join(crop_dir, f"{safe_label}_proc_{safe_text}.png")
+        cv2.imwrite(path_proc, processed)
 
 
 # ---------------------------------------------------------------------------
@@ -94,19 +141,79 @@ def preprocess_for_ocr(crop: np.ndarray, scale: int = 3) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Alternative preprocessing (adaptive threshold + CLAHE)
+# ---------------------------------------------------------------------------
+
+def preprocess_adaptive(crop: np.ndarray, scale: int = 3) -> np.ndarray:
+    """Alternative preprocessing using adaptive thresholding + CLAHE.
+
+    Better than Otsu when the global threshold merges text with the
+    oval border (producing garbled reads like "GD" instead of "LT04").
+    CLAHE enhances local contrast so thin text stands out from the background.
+    """
+    if len(crop.shape) == 3:
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = crop
+
+    gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+    # CLAHE contrast enhancement — makes text ink darker relative to background
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+
+    # Adaptive threshold — handles uneven illumination and avoids merging
+    # text with nearby border lines (which Otsu sometimes does)
+    binary = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 4
+    )
+
+    # Add white border
+    binary = cv2.copyMakeBorder(binary, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
+
+    return binary
+
+
+def ocr_crop_adaptive(crop: np.ndarray, scale: int = 3, psm: int = 8) -> str:
+    """Run Tesseract using adaptive preprocessing (fallback for Otsu failures)."""
+    processed = preprocess_adaptive(crop, scale=scale)
+    whitelist = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    text = pytesseract.image_to_string(processed, config=f"--psm {psm} {whitelist}").strip()
+    return text
+
+
+# ---------------------------------------------------------------------------
 # Tesseract OCR
 # ---------------------------------------------------------------------------
 
-def ocr_crop(crop: np.ndarray, scale: int = 3) -> str:
-    """Run Tesseract PSM-8 (single word) on a preprocessed crop.
+def ocr_crop(crop: np.ndarray, scale: int = 3, psm: int = 8) -> str:
+    """Run Tesseract on a preprocessed crop.
 
-    PSM-8 is the right mode for short fixture codes like "LT04A".
+    Args:
+        crop: the cropped oval image
+        scale: upscale factor before OCR
+        psm: Tesseract page segmentation mode
+             8 = single word (default), 7 = single line, 13 = raw line
+
     Whitelist restricts to A-Z 0-9.
+    If PSM 8 produces a very short result (< 3 alphanumeric chars),
+    automatically retries with PSM 7 (single text line) which works
+    better on some Tesseract installations (especially Windows 5.x).
     """
     processed = preprocess_for_ocr(crop, scale=scale)
     whitelist = "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-    text = pytesseract.image_to_string(processed, config=f"--psm 8 {whitelist}").strip()
+    text = pytesseract.image_to_string(processed, config=f"--psm {psm} {whitelist}").strip()
+
+    # Auto-retry with PSM 7 if PSM 8 produced a short/garbled result
+    alpha_count = sum(1 for c in text if c.isalnum())
+    if psm == 8 and alpha_count < 3:
+        alt = pytesseract.image_to_string(processed, config=f"--psm 7 {whitelist}").strip()
+        alt_alpha = sum(1 for c in alt if c.isalnum())
+        if alt_alpha > alpha_count:
+            logger.debug("PSM 7 improved OCR: %r → %r", text, alt)
+            text = alt
+
     return text
 
 

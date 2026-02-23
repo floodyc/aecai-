@@ -30,7 +30,9 @@ from .ocr import (
     _ocr_with_retries,
     crop_oval,
     ocr_crop,
+    ocr_crop_adaptive,
     recognize_fixtures,
+    save_debug_crop,
 )
 from .report import build_results_json, generate_txt_report
 from .shapes import find_ovals
@@ -228,6 +230,17 @@ def run_takeoff(
     sheet_map = sheet_map or {}
     multipliers = multipliers if multipliers is not None else {}
 
+    # Tesseract version info for diagnostics
+    tess_version = "unknown"
+    try:
+        import pytesseract
+        tess_version = str(pytesseract.get_tesseract_version())
+    except Exception:
+        pass
+
+    # Debug crop directory (if AECAI_DEBUG_CROPS=1)
+    from .ocr import _DEBUG_CROPS, _DEBUG_CROP_DIR
+
     # Diagnostics: collect debug info about each pipeline stage
     diagnostics: dict[str, Any] = {
         "legend_page": legend_page,
@@ -235,6 +248,9 @@ def run_takeoff(
         "legend_codes": [],
         "used_default_codes": False,
         "fixture_prefix": fixture_prefix,
+        "tesseract_version": tess_version,
+        "debug_crops_enabled": _DEBUG_CROPS,
+        "debug_crops_dir": _DEBUG_CROP_DIR if _DEBUG_CROPS else None,
         "pages": {},
     }
 
@@ -334,23 +350,29 @@ def run_takeoff(
                 # 150 DPI: need 6-8x upscale to reach ~900 effective DPI
                 _TMPL_OCR_STRATEGIES = [
                     {"margin_h": 0.05, "margin_v": 0.08, "scale": 6},
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 6, "psm": 7},
                     {"margin_h": 0.10, "margin_v": 0.12, "scale": 8},
-                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 6},
+                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 6, "adaptive": True},
                     {"margin_h": 0.15, "margin_v": 0.18, "scale": 7},
-                    {"margin_h": 0.00, "margin_v": 0.00, "scale": 8},
+                    {"margin_h": 0.00, "margin_v": 0.00, "scale": 8, "psm": 7},
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 8, "adaptive": True, "psm": 7},
                 ]
             else:
                 # Full DPI (300): standard 3-5x upscale
+                # Includes PSM 7 and adaptive preprocessing variants
+                # to handle Windows Tesseract 5.x quirks.
                 _TMPL_OCR_STRATEGIES = [
                     {"margin_h": 0.05, "margin_v": 0.08, "scale": 3},
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 3, "psm": 7},
                     {"margin_h": 0.10, "margin_v": 0.15, "scale": 4},
-                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 3},
+                    {"margin_h": 0.02, "margin_v": 0.04, "scale": 3, "adaptive": True},
                     {"margin_h": 0.15, "margin_v": 0.20, "scale": 5},
-                    {"margin_h": 0.00, "margin_v": 0.00, "scale": 4},
+                    {"margin_h": 0.00, "margin_v": 0.00, "scale": 4, "psm": 7},
+                    {"margin_h": 0.05, "margin_v": 0.08, "scale": 4, "adaptive": True, "psm": 7},
                 ]
 
             detections = []
-            for td in tmpl_detections:
+            for td_idx, td in enumerate(tmpl_detections):
                 oval = {"x": td["x"], "y": td["y"],
                         "w": td["w"], "h": td["h"]}
 
@@ -366,9 +388,23 @@ def run_takeoff(
                     if i == 0 and not _has_text_content(crop):
                         break  # no text visible — skip all strategies
 
-                    raw = ocr_crop(crop, scale=strat["scale"])
+                    # Use adaptive preprocessing if the strategy requests it
+                    psm = strat.get("psm", 8)
+                    if strat.get("adaptive"):
+                        raw = ocr_crop_adaptive(crop, scale=strat["scale"], psm=psm)
+                    else:
+                        raw = ocr_crop(crop, scale=strat["scale"], psm=psm)
+
                     if not best_raw and raw:
                         best_raw = raw
+
+                    # Save debug crops for first 5 detections (first strategy only)
+                    if i == 0 and td_idx < 5:
+                        save_debug_crop(
+                            crop, None,
+                            f"page{page_num}_det{td_idx}",
+                            raw,
+                        )
 
                     cleaned = _clean_and_normalize(raw)
                     if cleaned:
